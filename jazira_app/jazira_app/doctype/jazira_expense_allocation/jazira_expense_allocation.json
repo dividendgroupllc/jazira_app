@@ -1,0 +1,304 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "naming_series:",
+ "creation": "2026-05-04 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "from_date",
+  "to_date",
+  "posting_date",
+  "column_break_main",
+  "expense_company_scope",
+  "expense_source_company",
+  "create_source_reversal",
+  "source_offset_account",
+  "currency",
+  "status",
+  "source_reversal_journal_entry",
+  "section_settings",
+  "profit_source",
+  "section_companies",
+  "companies",
+  "section_totals",
+  "total_profit",
+  "total_basis_amount",
+  "column_break_totals",
+  "total_expense_amount",
+  "allocated_total",
+  "allocation_difference",
+  "section_expenses",
+  "expenses",
+  "section_remarks",
+  "remarks",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "default": "JEA-.YYYY.-.#####",
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "label": "Series",
+   "options": "JEA-.YYYY.-.#####",
+   "print_hide": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Period boshi",
+   "reqd": 1
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Period oxiri",
+   "reqd": 1
+  },
+  {
+   "default": "Today",
+   "description": "Oylik yopishda avtomatik period oxirgi sanasiga tenglanadi.",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "label": "Posting Date",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_main",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Allocation Companies",
+   "fieldname": "expense_company_scope",
+   "fieldtype": "Select",
+   "label": "Xarajat kompaniya doirasi",
+   "options": "Allocation Companies\nSource Company",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.expense_company_scope == 'Source Company'",
+   "fieldname": "expense_source_company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Xarajat manba kompaniyasi",
+   "mandatory_depends_on": "eval:doc.expense_company_scope == 'Source Company'",
+   "options": "Company",
+   "reqd": 0
+  },
+  {
+   "default": "1",
+   "fieldname": "create_source_reversal",
+   "fieldtype": "Check",
+   "label": "Yig'ilgan xarajatlarni yopish"
+  },
+  {
+   "depends_on": "eval:doc.create_source_reversal && doc.expense_company_scope == 'Source Company'",
+   "fieldname": "source_offset_account",
+   "fieldtype": "Link",
+   "label": "Manba clearing account",
+   "mandatory_depends_on": "eval:doc.create_source_reversal && doc.expense_company_scope == 'Source Company'",
+   "options": "Account"
+  },
+  {
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency",
+   "read_only": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Holat",
+   "options": "Draft\nCalculated\nSubmitted\nCancelled",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.source_reversal_journal_entry",
+   "fieldname": "source_reversal_journal_entry",
+   "fieldtype": "Link",
+   "label": "Source Reversal Journal Entry",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_settings",
+   "fieldtype": "Section Break",
+   "label": "Hisoblash sozlamalari"
+  },
+  {
+   "default": "GL Sales Profit",
+   "description": "GL Sales Profit POS/Sales va tannarx GL yozuvlarini oladi, oddiy Journal Entry xarajatlarini proporsiya bazasidan chiqaradi.",
+   "fieldname": "profit_source",
+   "fieldtype": "Select",
+   "label": "Foyda manbasi",
+   "options": "GL Sales Profit\nGL Net Profit\nSales Invoice Gross Profit",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_companies",
+   "fieldtype": "Section Break",
+   "label": "Kompaniyalar bo'yicha foyda va ulush"
+  },
+  {
+   "cannot_add_rows": 1,
+   "cannot_delete_rows": 1,
+   "fieldname": "companies",
+   "fieldtype": "Table",
+   "label": "Kompaniyalar",
+   "options": "Jazira Expense Allocation Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_totals",
+   "fieldtype": "Section Break",
+   "label": "Jami"
+  },
+  {
+   "fieldname": "total_profit",
+   "fieldtype": "Currency",
+   "label": "Jami foyda",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_basis_amount",
+   "fieldtype": "Currency",
+   "label": "Proporsiya bazasi",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_totals",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "total_expense_amount",
+   "fieldtype": "Currency",
+   "label": "Journal Entry xarajatlari",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allocated_total",
+   "fieldtype": "Currency",
+   "label": "Ajratilgan jami",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allocation_difference",
+   "fieldtype": "Currency",
+   "label": "Farq",
+   "options": "currency",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_expenses",
+   "fieldtype": "Section Break",
+   "label": "Perioddagi Journal Entry xarajatlari"
+  },
+  {
+   "fieldname": "expenses",
+   "fieldtype": "Table",
+   "label": "Journal Entry xarajatlari",
+   "options": "Jazira Expense Allocation Expense"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_remarks",
+   "fieldtype": "Section Break",
+   "label": "Izoh"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Izoh"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Jazira Expense Allocation",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [
+  {
+   "link_doctype": "Journal Entry",
+   "link_fieldname": "custom_jazira_expense_allocation"
+  }
+ ],
+ "modified": "2026-05-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Jazira App",
+ "name": "Jazira Expense Allocation",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Accounts User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "expense_source_company",
+ "track_changes": 1
+}

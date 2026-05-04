@@ -34,6 +34,7 @@ fixtures = [
         "filters": [
             ["dt", "in", [
                 "Sales Invoice",
+                "Journal Entry",
                 "Stock Entry",
                 "Item",
                 "BOM"
@@ -346,4 +347,3 @@ user_data_fields = [
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-

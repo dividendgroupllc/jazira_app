@@ -1,0 +1,120 @@
+{
+ "actions": [],
+ "creation": "2026-05-04 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": [
+  "journal_entry",
+  "posting_date",
+  "company",
+  "account",
+  "account_name",
+  "cost_center",
+  "debit",
+  "credit",
+  "net_amount",
+  "user_remark",
+  "journal_entry_detail"
+ ],
+ "fields": [
+  {
+   "columns": 2,
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Journal Entry",
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Posting Date",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Kompaniya",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Account",
+   "options": "Account",
+   "read_only": 1
+  },
+  {
+   "fieldname": "account_name",
+   "fieldtype": "Data",
+   "label": "Account Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "debit",
+   "fieldtype": "Currency",
+   "label": "Debit",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "credit",
+   "fieldtype": "Currency",
+   "label": "Credit",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "net_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Net xarajat",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "user_remark",
+   "fieldtype": "Small Text",
+   "label": "Izoh",
+   "read_only": 1
+  },
+  {
+   "fieldname": "journal_entry_detail",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Journal Entry Detail",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Jazira App",
+ "name": "Jazira Expense Allocation Expense",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

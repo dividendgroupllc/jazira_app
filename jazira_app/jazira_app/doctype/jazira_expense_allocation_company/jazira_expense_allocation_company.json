@@ -1,0 +1,119 @@
+{
+ "actions": [],
+ "creation": "2026-05-04 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "profit_amount",
+  "allocation_basis_amount",
+  "profit_percent",
+  "allocated_expense_amount",
+  "column_break_accounts",
+  "expense_account",
+  "offset_account",
+  "cost_center",
+  "reversal_journal_entry",
+  "allocation_journal_entry"
+ ],
+ "fields": [
+  {
+   "columns": 3,
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Kompaniya",
+   "options": "Company",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "profit_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Foyda",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allocation_basis_amount",
+   "fieldtype": "Currency",
+   "label": "Proporsiya bazasi",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "columns": 1,
+   "fieldname": "profit_percent",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Ulush %",
+   "read_only": 1
+  },
+  {
+   "columns": 2,
+   "fieldname": "allocated_expense_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Ajratilgan xarajat",
+   "options": "Company:company:default_currency",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_accounts",
+   "fieldtype": "Column Break"
+  },
+  {
+   "columns": 2,
+   "fieldname": "expense_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Xarajat account",
+   "options": "Account"
+  },
+  {
+   "columns": 2,
+   "fieldname": "offset_account",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Qarshi account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "cost_center",
+   "fieldtype": "Link",
+   "label": "Cost Center",
+   "options": "Cost Center"
+  },
+  {
+   "fieldname": "reversal_journal_entry",
+   "fieldtype": "Link",
+   "label": "Reversal Journal Entry",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allocation_journal_entry",
+   "fieldtype": "Link",
+   "label": "Allocation Journal Entry",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Jazira App",
+ "name": "Jazira Expense Allocation Company",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
