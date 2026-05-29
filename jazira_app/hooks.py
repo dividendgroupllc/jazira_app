@@ -91,10 +91,8 @@ doc_events = {
         # Counter-service model: stiker raqamlari qayta ishlatilishi uchun
         "on_submit": "jazira_app.jazira_app.overrides.pos_invoice.on_submit",
     },
-    "Sales Order": {
-        # Inter-company SO submit bo'lganda Sales Invoice + Purchase Invoice avtomatik yaratish
-        "on_submit": "jazira_app.overrides.sales_order.on_submit",
-    },
+    # Sales Order inter-company avtomatlashtirish ury app'ga ko'chirildi
+    # (ury.ury.hooks.sklad_sales_order) — double-invoicing oldini olish uchun.
     "Sales Invoice": {
         # Amended inter-company SI: yangi narx hisoblash va PI amend qilish
         "validate": "jazira_app.overrides.sales_invoice.on_validate",

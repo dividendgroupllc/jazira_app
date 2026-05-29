@@ -59,11 +59,8 @@ def _recalculate_rates(doc):
 	if not markup_percent:
 		return
 
-	# Sklad Settings dan main_warehouse (amend uchun valuation_rate bazasi)
-	names = frappe.get_all("Sklad Settings", limit=1, pluck="name")
-	if not names:
-		frappe.throw("Sklad Settings topilmadi — SI amend narxlarini hisoblash mumkin emas.")
-	main_warehouse = frappe.db.get_value("Sklad Settings", names[0], "main_warehouse")
+	# Sklad Settings (Single) dan main_warehouse (amend uchun valuation_rate bazasi)
+	main_warehouse = frappe.db.get_single_value("Sklad Settings", "main_warehouse")
 	if not main_warehouse:
 		frappe.throw("Sklad Settings da 'Main Warehouse' belgilanmagan — SI amend uchun kerak.")
 
