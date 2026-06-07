@@ -3,6 +3,14 @@
 
 frappe.ui.form.on('Production Entry', {
     refresh: function(frm) {
+        frm.set_query("item_to_manufacture", function() {
+            return {
+                filters: {
+                    "item_group": "Полуфабрикат"
+                }
+            };
+        });
+
         frm.set_query("bom_no", function() {
             return {
                 filters: {
