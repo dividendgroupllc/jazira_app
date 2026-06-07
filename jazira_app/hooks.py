@@ -99,6 +99,10 @@ doc_events = {
         "validate": "jazira_app.overrides.sales_invoice.on_validate",
         "on_submit": "jazira_app.overrides.sales_invoice.on_submit",
     },
+    "Purchase Order": {
+        # Submit bo'lganda company guruhiga Telegram xabari yuboriladi
+        "on_submit": "jazira_app.jazira_app.overrides.purchase_order.on_submit",
+    },
 }
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
