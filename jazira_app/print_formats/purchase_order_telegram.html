@@ -1,0 +1,268 @@
+{% macro qty(value) -%}
+	{{ "{:,.3f}".format((value or 0)|float).rstrip("0").rstrip(".") }}
+{%- endmacro %}
+
+<style>
+	@page {
+		size: A4 portrait;
+		margin: 8mm;
+	}
+
+	.print-format {
+		orientation: Portrait;
+		page-size: A4;
+		padding: 0 !important;
+		width: 100% !important;
+		max-width: none !important;
+		color: #172033;
+		font-family: Calibri, Arial, sans-serif;
+		font-size: 12px;
+		line-height: 1.32;
+	}
+
+	.print-format * {
+		box-sizing: border-box;
+	}
+
+	.sheet {
+		width: 100%;
+	}
+
+	.header-table,
+	.party-table,
+	.items-table {
+		width: 100%;
+		border-collapse: collapse;
+		table-layout: fixed;
+	}
+
+	.header-table {
+		margin-bottom: 8px;
+		border-bottom: 2px solid #0f4c81;
+	}
+
+	.header-left {
+		width: 55%;
+		padding: 0 0 6px;
+		vertical-align: bottom;
+	}
+
+	.header-right {
+		width: 45%;
+		padding: 0 0 6px;
+		vertical-align: bottom;
+	}
+
+	.title {
+		margin: 0;
+		color: #0f4c81;
+		font-size: 24px;
+		font-style: italic;
+		font-weight: 700;
+	}
+
+	.company {
+		margin-top: 4px;
+		color: #0f172a;
+		font-size: 16px;
+		font-weight: 700;
+	}
+
+	.meta-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 11px;
+	}
+
+	.meta-table td {
+		padding: 4px 6px;
+		border: 1px solid #cbd5e1;
+	}
+
+	.meta-label {
+		width: 42%;
+		background: #eef4fa;
+		color: #334155;
+		text-align: right;
+		font-weight: 700;
+	}
+
+	.meta-value {
+		color: #0f172a;
+		font-weight: 700;
+	}
+
+	.party-table {
+		margin-bottom: 8px;
+		border: 1px solid #cbd5e1;
+	}
+
+	.party-table td {
+		padding: 6px 8px;
+		vertical-align: top;
+	}
+
+	.field-label {
+		margin-bottom: 2px;
+		color: #64748b;
+		font-size: 8.5px;
+		font-weight: 700;
+		text-transform: uppercase;
+	}
+
+	.field-value {
+		min-height: 14px;
+		color: #111827;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.items-table {
+		border: 1px solid #0f4c81;
+	}
+
+	.items-table col.idx {
+		width: 8%;
+	}
+
+	.items-table col.item {
+		width: 54%;
+	}
+
+	.items-table col.qty {
+		width: 18%;
+	}
+
+	.items-table col.uom {
+		width: 20%;
+	}
+
+	.items-table tfoot td {
+		border: 1px solid #0f4c81;
+		background: #eef4fa;
+		font-size: 11px;
+		font-weight: 700;
+		color: #0f172a;
+	}
+
+	.total-label {
+		text-align: right;
+	}
+
+	.items-table th {
+		padding: 5px 4px;
+		border: 1px solid #0f4c81;
+		background: #0f4c81;
+		color: #fff;
+		text-align: center;
+		font-size: 11px;
+		font-weight: 700;
+	}
+
+	.items-table td {
+		height: 22px;
+		padding: 4px 6px;
+		border: 1px solid #d6e0ea;
+		vertical-align: middle;
+		font-size: 10.5px;
+		page-break-inside: avoid;
+	}
+
+	.items-table tbody tr:nth-child(even) td {
+		background: #f8fbfe;
+	}
+
+	.idx-cell,
+	.center {
+		text-align: center;
+	}
+
+	.item-name {
+		color: #111827;
+		font-weight: 700;
+	}
+
+	.item-code {
+		margin-top: 1px;
+		color: #64748b;
+		font-size: 8.5px;
+	}
+</style>
+
+<div class="sheet">
+	<table class="header-table">
+		<tr>
+			<td class="header-left">
+				<h1 class="title">Харид буюртмаси</h1>
+				<div class="company">{{ doc.company }}</div>
+			</td>
+			<td class="header-right">
+				<table class="meta-table">
+					<tr>
+						<td class="meta-label">Рақам</td>
+						<td class="meta-value">{{ doc.name }}</td>
+					</tr>
+					<tr>
+						<td class="meta-label">Сана</td>
+						<td class="meta-value">{{ doc.get_formatted("transaction_date") }}</td>
+					</tr>
+					{% set reqd_by = doc.schedule_date or (doc.items[0].schedule_date if doc.items else None) %}
+					<tr>
+						<td class="meta-label">Required By</td>
+						<td class="meta-value">{{ frappe.utils.format_date(reqd_by) if reqd_by else "" }}</td>
+					</tr>
+				</table>
+			</td>
+		</tr>
+	</table>
+
+	<table class="party-table">
+		<tr>
+			<td>
+				<div class="field-label">Таъминотчи</div>
+				<div class="field-value">{{ doc.supplier_name or doc.supplier }}</div>
+			</td>
+		</tr>
+	</table>
+
+	<table class="items-table">
+		<colgroup>
+			<col class="idx">
+			<col class="item">
+			<col class="qty">
+			<col class="uom">
+		</colgroup>
+		<thead>
+			<tr>
+				<th>№</th>
+				<th>Маҳсулот</th>
+				<th>Сони</th>
+				<th>Ўлчов бирлиги</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for item in doc.items %}
+				<tr>
+					<td class="idx-cell">{{ loop.index }}</td>
+					<td>
+						<div class="item-name">{{ item.item_name or item.item_code }}</div>
+						{% if item.item_code and item.item_code != item.item_name %}
+							<div class="item-code">{{ item.item_code }}</div>
+						{% endif %}
+					</td>
+					<td class="center">{{ qty(item.qty) }}</td>
+					<td class="center">{{ item.uom or item.stock_uom or "" }}</td>
+				</tr>
+			{% endfor %}
+		</tbody>
+		<tfoot>
+			{% set total_qty = doc.items | sum(attribute="qty") %}
+			<tr>
+				<td></td>
+				<td class="total-label">ЖАМИ ({{ doc.items | length }} та)</td>
+				<td class="center">{{ qty(total_qty) }}</td>
+				<td></td>
+			</tr>
+		</tfoot>
+	</table>
+</div>

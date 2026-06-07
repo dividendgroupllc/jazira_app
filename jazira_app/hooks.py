@@ -82,6 +82,8 @@ after_migrate = [
     # "jazira_app.jazira_app.setup.kassa_setup.create_party_types",
     # "jazira_app.jazira_app.setup.manager_setup.run_manager_setup"
     "jazira_app.jazira_app.setup.print_format_setup.create_sales_order_print_format",
+    "jazira_app.jazira_app.setup.print_format_setup.create_purchase_order_print_format",
+    "jazira_app.jazira_app.overrides.purchase_order.ensure_custom_fields",
 ]
 
 # Document Events
@@ -100,8 +102,10 @@ doc_events = {
         "on_submit": "jazira_app.overrides.sales_invoice.on_submit",
     },
     "Purchase Order": {
-        # Submit bo'lganda company guruhiga Telegram xabari yuboriladi
+        # Submit bo'lganda company guruhiga Telegram xabari yuboriladi,
+        # cancel bo'lganda o'sha xabarga reply qilib "бекор қилинди" yuboriladi
         "on_submit": "jazira_app.jazira_app.overrides.purchase_order.on_submit",
+        "on_cancel": "jazira_app.jazira_app.overrides.purchase_order.on_cancel",
     },
 }
 # Each item in the list will be shown as an app in the apps page

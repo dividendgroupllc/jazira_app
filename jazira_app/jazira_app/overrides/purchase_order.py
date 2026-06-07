@@ -1,34 +1,82 @@
-"""Purchase Order submit bo'lganda company guruhiga Telegram xabari yuboradi.
+"""Purchase Order submit/cancel bo'lganda company guruhiga Telegram xabari yuboradi.
 
 Har bir company (filial) uchun alohida guruh. Mapping site_config.json da:
 	"telegram_po_chat_ids": {
 		"Jazira Saripul": "-1001111111111",
 		"Jazira Sklad":   "-1002222222222"
 	}
+
+Submit'da guruhga PO ning PDF si yuboriladi; uning message_id si PO ning custom
+maydonida saqlanadi. Cancel bo'lganda "бекор қилинди" xabari o'sha PDF ga reply
+qilib yuboriladi.
 """
 
 import frappe
-from frappe.utils import escape_html, flt, fmt_money, format_date, get_fullname
+from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.utils import escape_html, get_fullname
 
-# Telegram bitta xabar uchun ~4096 belgi cheklovi bor — ko'p bo'lsa qisqartiramiz
-MAX_ITEMS = 50
+from jazira_app.jazira_app.integrations.telegram import send_document, send_message
+
+# Submit PDF xabarining message_id si shu maydonda saqlanadi (cancel'da reply uchun)
+MSG_ID_FIELD = "custom_telegram_message_id"
+
+_TASK = "jazira_app.jazira_app.overrides.purchase_order.send_notification"
 
 
 def on_submit(doc, method=None):
+	if not _get_chat_id(doc.company):
+		return
+	frappe.enqueue(
+		_TASK,
+		queue="short",
+		enqueue_after_commit=True,
+		po_name=doc.name,
+		action="submit",
+	)
+
+
+def on_cancel(doc, method=None):
+	if not _get_chat_id(doc.company):
+		return
+	frappe.enqueue(
+		_TASK,
+		queue="short",
+		enqueue_after_commit=True,
+		po_name=doc.name,
+		action="cancel",
+	)
+
+
+def send_notification(po_name, action):
+	"""Background task — PO bo'yicha submit (PDF) yoki cancel (reply) xabarini yuboradi."""
+	doc = frappe.get_doc("Purchase Order", po_name)
 	chat_id = _get_chat_id(doc.company)
 	if not chat_id:
-		# Bu company uchun guruh sozlanmagan — jim o'tamiz
 		return
 
-	text = _build_message(doc)
-
-	# Submit jarayonini sekinlashtirmaslik uchun fon (background) da yuboramiz
-	frappe.enqueue(
-		"jazira_app.jazira_app.integrations.telegram.send_message",
-		queue="short",
-		chat_id=chat_id,
-		text=text,
-	)
+	if action == "submit":
+		pdf = _generate_pdf(doc)
+		result = send_document(
+			chat_id,
+			pdf,
+			filename=f"{po_name}.pdf",
+			caption=_build_caption(doc),
+		)
+		message_id = (result or {}).get("message_id")
+		if message_id:
+			frappe.db.set_value(
+				"Purchase Order",
+				po_name,
+				MSG_ID_FIELD,
+				str(message_id),
+				update_modified=False,
+			)
+			frappe.db.commit()
+	elif action == "cancel":
+		reply_to = doc.get(MSG_ID_FIELD)
+		send_message(
+			chat_id, _build_cancel_message(doc), reply_to_message_id=reply_to
+		)
 
 
 def _get_chat_id(company):
@@ -36,47 +84,66 @@ def _get_chat_id(company):
 	return mapping.get(company)
 
 
-def _qty(value):
-	value = flt(value)
-	return ("%f" % value).rstrip("0").rstrip(".") if value else "0"
+def _generate_pdf(doc):
+	"""PO ni PDF ga aylantiradi. Print formatning HTML shabloni to'liq inline
+	uslubga ega — shuning uchun tashqi resurs (sayt hosti/asset) talab qilmaydi."""
+	from frappe.utils.pdf import get_pdf
+
+	template_path = frappe.get_app_path(
+		"jazira_app", "print_formats", "purchase_order_telegram.html"
+	)
+	with open(template_path, encoding="utf-8") as f:
+		template = f.read()
+
+	body = frappe.render_template(template, {"doc": doc})
+	html = (
+		"<!DOCTYPE html><html><head><meta charset='utf-8'></head>"
+		"<body class='print-format'>" + body + "</body></html>"
+	)
+	return get_pdf(html)
 
 
-def _build_message(doc):
-	currency = doc.currency
-	supplier = doc.supplier_name or doc.supplier
-	created_by = get_fullname(doc.owner)
-
+def _build_caption(doc):
+	"""PDF ga qisqa izoh (caption) — guruhda o'qish uchun."""
 	lines = [
 		"🧾 <b>Янги харид буюртмаси</b>",
+		f"🏢 <b>Компания:</b> {escape_html(doc.company)}",
+		f"🔢 <b>Рақам:</b> {escape_html(doc.name)}",
+		f"🚚 <b>Таъминотчи:</b> {escape_html(doc.supplier_name or doc.supplier)}",
+		f"👤 <b>Яратди:</b> {escape_html(get_fullname(doc.owner))}",
+	]
+	return "\n".join(lines)
+
+
+def _build_cancel_message(doc):
+	cancelled_by = get_fullname(doc.modified_by)
+	lines = [
+		"❌ <b>Харид буюртмаси БЕКОР ҚИЛИНДИ</b>",
 		"",
 		f"🏢 <b>Компания:</b> {escape_html(doc.company)}",
 		f"🔢 <b>Рақам:</b> {escape_html(doc.name)}",
-		f"📅 <b>Сана:</b> {escape_html(format_date(doc.transaction_date))}",
-		f"🚚 <b>Таъминотчи:</b> {escape_html(supplier)}",
+		f"🚚 <b>Таъминотчи:</b> {escape_html(doc.supplier_name or doc.supplier)}",
+		f"👤 <b>Бекор қилди:</b> {escape_html(cancelled_by)}",
 	]
-
-	if doc.get("schedule_date"):
-		lines.append(
-			f"📦 <b>Етказиб бериш:</b> {escape_html(format_date(doc.schedule_date))}"
-		)
-
-	lines.append(f"👤 <b>Яратди:</b> {escape_html(created_by)}")
-	lines.append("")
-	lines.append("📋 <b>Маҳсулотлар:</b>")
-
-	items = doc.items or []
-	for i, item in enumerate(items[:MAX_ITEMS], start=1):
-		name = escape_html(item.item_name or item.item_code)
-		uom = escape_html(item.uom or item.stock_uom or "")
-		qty = _qty(item.qty)
-		rate = fmt_money(item.rate, currency=currency)
-		amount = fmt_money(item.amount, currency=currency)
-		lines.append(f"{i}. {name} — {qty} {uom} × {rate} = {amount}")
-
-	if len(items) > MAX_ITEMS:
-		lines.append(f"… ва яна {len(items) - MAX_ITEMS} та маҳсулот")
-
-	lines.append("")
-	lines.append(f"💰 <b>Жами:</b> {fmt_money(doc.grand_total, currency=currency)}")
-
 	return "\n".join(lines)
+
+
+def ensure_custom_fields():
+	"""message_id saqlash uchun yashirin custom maydonni yaratadi (idempotent)."""
+	create_custom_fields(
+		{
+			"Purchase Order": [
+				{
+					"fieldname": MSG_ID_FIELD,
+					"label": "Telegram Message ID",
+					"fieldtype": "Data",
+					"read_only": 1,
+					"hidden": 1,
+					"no_copy": 1,
+					"print_hide": 1,
+					"translatable": 0,
+				}
+			]
+		},
+		ignore_validate=True,
+	)
