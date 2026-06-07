@@ -81,6 +81,7 @@ fixtures = [
 after_migrate = [
     # "jazira_app.jazira_app.setup.kassa_setup.create_party_types",
     # "jazira_app.jazira_app.setup.manager_setup.run_manager_setup"
+    "jazira_app.jazira_app.setup.print_format_setup.create_sales_order_print_format",
 ]
 
 # Document Events

@@ -9,3 +9,4 @@ jazira_app.patches.v1_0.update_order_types
 jazira_app.patches.v1_0.create_cashier_users
 jazira_app.patches.v1_0.warehouse_and_pos_opening
 jazira_app.patches.v1_0.add_card_payment_modes
+jazira_app.patches.v1_0.add_sales_order_print_format
