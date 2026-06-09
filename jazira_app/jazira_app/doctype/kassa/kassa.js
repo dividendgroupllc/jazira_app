@@ -34,23 +34,29 @@ frappe.ui.form.on('Kassa', {
         
         // Party Type - barchasi
         frm.set_query('party_type', () => ({}));
-        
-        // Prochee kontragent - faqat faol
-        frm.set_query('prochee_kontragent', () => ({
-            filters: { is_active: 1 }
-        }));
-        
-        // Kontragent
+
+        // Kontragent — inter-company (company-ifodalovchi) Customer/Supplier
+        // larni yashiramiz: ular avtomatik ishlatiladi, qo'lda tanlanmaydi.
         frm.set_query('kontragent', () => {
             const party_type = frm.doc.party_type;
-            if (party_type === 'Customer') {
-                return { filters: { disabled: 0 } };
-            } else if (party_type === 'Supplier') {
-                return { filters: { disabled: 0 } };
+            if (party_type === 'Customer' || party_type === 'Supplier') {
+                return {
+                    filters: {
+                        disabled: 0,
+                        represents_company: ['is', 'not set']
+                    }
+                };
             }
             return {};
         });
         
+        // Xarajat kontragenti — tanlangan FILIAL company'sining xarajat
+        // guruhi (52001/52002) ostidagi hisoblar. Avval filial tanlanadi.
+        frm.set_query('expense_kontragent', () => ({
+            query: 'jazira_app.jazira_app.doctype.kassa.kassa.get_filial_expense_accounts',
+            filters: { filial: frm.doc.filial || '' }
+        }));
+
         // Target account - source tanlanmagan bo'lsa bo'sh
         // Source tanlangandan keyin transfer_source_display() da query o'rnatiladi
         frm.set_query('target_account', () => {
@@ -62,21 +68,10 @@ frappe.ui.form.on('Kassa', {
             return {};
         });
     },
-    
-    // =========================================================================
-    // UPDATE EXPENSE FILTER - company bo'yicha
-    // =========================================================================
-    
-    update_expense_filter(frm) {
-        if (frm.doc.company) {
-            frm.set_query('expense_kontragent', () => ({
-                filters: {
-                    root_type: 'Expense',
-                    is_group: 0,
-                    company: frm.doc.company
-                }
-            }));
-        }
+
+    // Filial o'zgarsa - xarajat hisobini tozalash (guruh o'zgaradi)
+    filial(frm) {
+        frm.set_value('expense_kontragent', '');
     },
     
     // =========================================================================
@@ -94,7 +89,6 @@ frappe.ui.form.on('Kassa', {
         frm.set_value('party_type', '');
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
-        frm.set_value('prochee_kontragent', '');
         frm.set_value('filial', '');
         frm.set_value('company', '');
         frm.set_value('payment_account', '');
@@ -124,9 +118,6 @@ frappe.ui.form.on('Kassa', {
                         frm.set_value('payment_account', r.message.account);
                         frm.set_value('source_balance', r.message.balance);
                         frm.set_value('company', r.message.company);
-                        
-                        // Expense filter yangilash (faqat Расходы uchun)
-                        frm.trigger('update_expense_filter');
                     } else {
                         frappe.msgprint({
                             title: __('Hisob topilmadi'),
@@ -248,11 +239,9 @@ frappe.ui.form.on('Kassa', {
     party_type(frm) {
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
-        frm.set_value('prochee_kontragent', '');
         frm.set_value('filial', '');
-        
+
         frm.trigger('toggle_fields');
-        frm.trigger('update_expense_filter');
     },
     
     // =========================================================================
@@ -272,12 +261,10 @@ frappe.ui.form.on('Kassa', {
             frm.set_df_property('party_type', 'reqd', 1);
             frm.set_df_property('kontragent', 'reqd', is_standard ? 1 : 0);
             frm.set_df_property('expense_kontragent', 'reqd', is_expense ? 1 : 0);
-            frm.set_df_property('prochee_kontragent', 'reqd', party_type === 'Прочее лицо' ? 1 : 0);
         } else {
             frm.set_df_property('party_type', 'reqd', 0);
             frm.set_df_property('kontragent', 'reqd', 0);
             frm.set_df_property('expense_kontragent', 'reqd', 0);
-            frm.set_df_property('prochee_kontragent', 'reqd', 0);
         }
         
         frm.refresh_fields();
@@ -319,12 +306,13 @@ frappe.ui.form.on('Kassa', {
                 frappe.throw(__("Kontragent tanlanmagan"));
             }
             
-            if (party_type === 'Расходы' && !frm.doc.expense_kontragent) {
-                frappe.throw(__("Xarajat kontragenti tanlanmagan"));
-            }
-            
-            if (party_type === 'Прочее лицо' && !frm.doc.prochee_kontragent) {
-                frappe.throw(__("Boshqa shaxs tanlanmagan"));
+            if (party_type === 'Расходы') {
+                if (!frm.doc.filial) {
+                    frappe.throw(__("Filial tanlanmagan"));
+                }
+                if (!frm.doc.expense_kontragent) {
+                    frappe.throw(__("Xarajat kontragenti tanlanmagan"));
+                }
             }
         }
     }

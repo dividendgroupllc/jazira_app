@@ -16,8 +16,7 @@ import frappe
 def create_party_types():
     """Kassa uchun yangi Party Type'lar yaratish."""
     party_types = [
-        {"party_type": "Расходы", "account_type": "Payable"},
-        {"party_type": "Прочее лицо", "account_type": "Payable"}
+        {"party_type": "Расходы", "account_type": "Payable"}
     ]
     
     for pt in party_types:
@@ -57,25 +56,6 @@ def create_sample_filials():
             print(f"⚠️  Error creating {name}: {str(e)}")
 
 
-def create_sample_kontragents():
-    """Namuna kontragentlar yaratish (Прочее лицо uchun)."""
-    kontragents = ["Иванов И.И.", "Петров П.П.", "Boshqa shaxs"]
-    
-    for name in kontragents:
-        try:
-            if not frappe.db.exists("Kassa Kontragent", name):
-                doc = frappe.new_doc("Kassa Kontragent")
-                doc.kontragent_name = name
-                doc.is_active = 1
-                doc.insert(ignore_permissions=True)
-                frappe.db.commit()
-                print(f"✅ Created Kassa Kontragent: {name}")
-            else:
-                print(f"⏭️  Kassa Kontragent already exists: {name}")
-        except Exception as e:
-            print(f"⚠️  Error creating {name}: {str(e)}")
-
-
 def run_full_setup():
     """To'liq setup."""
     print("=" * 50)
@@ -87,10 +67,7 @@ def run_full_setup():
     
     print("\n2. Creating Sample Filials...")
     create_sample_filials()
-    
-    print("\n3. Creating Sample Kontragents...")
-    create_sample_kontragents()
-    
+
     print("\n" + "=" * 50)
     print("✅ SETUP COMPLETED!")
     print("=" * 50)

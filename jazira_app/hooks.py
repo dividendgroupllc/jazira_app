@@ -55,7 +55,7 @@ fixtures = [
     },
     {
         "dt": "Party Type",
-        "filters": [["party_type", "in", ["Расходы", "Прочее лицо"]]]
+        "filters": [["party_type", "in", ["Расходы"]]]
     },
     {
         "dt": "Custom Field",
@@ -81,9 +81,9 @@ fixtures = [
 after_migrate = [
     # "jazira_app.jazira_app.setup.kassa_setup.create_party_types",
     # "jazira_app.jazira_app.setup.manager_setup.run_manager_setup"
-    "jazira_app.jazira_app.setup.print_format_setup.create_sales_order_print_format",
-    "jazira_app.jazira_app.setup.print_format_setup.create_purchase_order_print_format",
-    "jazira_app.jazira_app.overrides.purchase_order.ensure_custom_fields",
+    # Har bir sozlama alohida try/except bilan chaqiriladi (bittasi xato bersa
+    # ham qolganlari ishlaydi) — qarang setup/after_migrate.py
+    "jazira_app.jazira_app.setup.after_migrate.run",
 ]
 
 # Document Events

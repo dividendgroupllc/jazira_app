@@ -19,13 +19,13 @@
   "target_balance",
   "section_kontragent",
   "party_type",
+  "column_break_kontragent",
+  "filial",
+  "section_break_expense",
   "kontragent",
   "expense_kontragent",
-  "prochee_kontragent",
   "section_summa",
   "summa",
-  "column_break_summa",
-  "filial",
   "section_notes",
   "primechaniya",
   "section_info",
@@ -33,6 +33,8 @@
   "column_break_info",
   "payment_account_2",
   "journal_entry",
+  "payment_entry",
+  "payment_entry_receive",
   "company",
   "amended_from"
  ],
@@ -140,6 +142,24 @@
    "options": "Party Type"
   },
   {
+   "fieldname": "column_break_kontragent",
+   "fieldtype": "Column Break"
+  },
+  {
+   "depends_on": "eval:doc.party_type=='Расходы'",
+   "fieldname": "filial",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Filial",
+   "mandatory_depends_on": "eval:doc.party_type=='Расходы'",
+   "options": "Kassa Filial"
+  },
+  {
+   "depends_on": "eval:doc.oborot && doc.oborot!='Перемещение'",
+   "fieldname": "section_break_expense",
+   "fieldtype": "Section Break"
+  },
+  {
    "depends_on": "eval:['Customer','Supplier','Employee','Shareholder'].includes(doc.party_type)",
    "fieldname": "kontragent",
    "fieldtype": "Dynamic Link",
@@ -154,13 +174,6 @@
    "options": "Account"
   },
   {
-   "depends_on": "eval:doc.party_type=='Прочее лицо'",
-   "fieldname": "prochee_kontragent",
-   "fieldtype": "Link",
-   "label": "Boshqa shaxs",
-   "options": "Kassa Kontragent"
-  },
-  {
    "depends_on": "eval:doc.oborot",
    "fieldname": "section_summa",
    "fieldtype": "Section Break",
@@ -172,18 +185,6 @@
    "in_list_view": 1,
    "label": "Summa",
    "reqd": 1
-  },
-  {
-   "fieldname": "column_break_summa",
-   "fieldtype": "Column Break"
-  },
-  {
-   "depends_on": "eval:doc.party_type=='Расходы'",
-   "fieldname": "filial",
-   "fieldtype": "Link",
-   "in_standard_filter": 1,
-   "label": "Filial",
-   "options": "Kassa Filial"
   },
   {
    "collapsible": 1,
@@ -226,6 +227,20 @@
    "fieldtype": "Link",
    "label": "Journal Entry",
    "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry",
+   "fieldtype": "Link",
+   "label": "Payment Entry",
+   "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry_receive",
+   "fieldtype": "Link",
+   "label": "Payment Entry (Receive)",
+   "options": "Payment Entry",
    "read_only": 1
   },
   {

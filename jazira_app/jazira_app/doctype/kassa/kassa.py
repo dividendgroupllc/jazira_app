@@ -13,21 +13,42 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+# Divident kontragent turlari -> hisob raqami (to'lovchi company bo'yicha olinadi)
+DIVIDEND_ACCOUNT_NUMBERS = {
+    "Divident Akmal": "3200",
+    "Divident Elyor": "3201",
+}
+
 
 class Kassa(Document):
     """Kassa Document."""
     
     def validate(self):
         self.validate_summa()
+        self.validate_kontragent()
         self.set_company_and_accounts()
         self.validate_transfer()
         self.validate_expense_kontragent()
         self.clear_irrelevant_fields()
-    
+
     def validate_summa(self):
         """Summa > 0 bo'lishi kerak."""
         if self.summa <= 0:
             frappe.throw(_("Summa 0 dan katta bo'lishi kerak"))
+
+    def validate_kontragent(self):
+        """Inter-company (company-ifodalovchi) Customer/Supplier ni qo'lda
+        tanlash taqiqlanadi — ular avtomatik ishlatiladi."""
+        if self.party_type in ("Customer", "Supplier") and self.kontragent:
+            represents = frappe.db.get_value(
+                self.party_type, self.kontragent, "represents_company"
+            )
+            if represents:
+                frappe.throw(_(
+                    "'{0}' — bu kompaniyani ifodalovchi ichki kontragent, uni "
+                    "qo'lda tanlab bo'lmaydi. Filiallararo xarajat uchun «Расходы» "
+                    "turini va «Filial» maydonini ishlating."
+                ).format(self.kontragent))
     
     def set_company_and_accounts(self):
         """Mode of Payment'dan company va account olish."""
@@ -84,26 +105,47 @@ class Kassa(Document):
     
     def validate_expense_kontragent(self):
         """
-        FAQAT Расходы uchun company tekshiruvi!
-        Expense account Mode of Payment bilan bir xil company bo'lishi kerak.
+        FAQAT Расходы uchun tekshiruv.
+        - Filial majburiy (xarajat egasi company'sini belgilaydi).
+        - Expense account «Expense» turida bo'lishi kerak.
+        - Amortizatsiya (Depreciation) hisobi kassadan to'lanmaydi -> taqiqlanadi.
+        - Xarajat hisobi FILIAL company'siga tegishli bo'lishi kerak (xarajat shu
+          filial kitobida yoziladi; inter-company'da to'g'ridan-to'g'ri ishlatiladi).
         """
-        if self.party_type == "Расходы" and self.expense_kontragent:
+        if self.party_type != "Расходы":
+            return
+
+        if not self.filial:
+            frappe.throw(_("Расходы uchun Filial tanlanishi shart"))
+
+        filial_company = frappe.db.get_value("Kassa Filial", self.filial, "company")
+
+        if self.expense_kontragent:
             account_data = frappe.db.get_value(
-                "Account", 
-                self.expense_kontragent, 
-                ["root_type", "company"], 
+                "Account",
+                self.expense_kontragent,
+                ["root_type", "company", "account_type"],
                 as_dict=True
             )
-            
+
             if not account_data:
                 frappe.throw(_("Xarajat kontragenti topilmadi."))
-            
+
             if account_data.root_type != "Expense":
                 frappe.throw(_("Xarajat kontragenti faqat Expense account bo'lishi kerak."))
-            
-            if self.company and account_data.company != self.company:
+
+            if account_data.account_type == "Depreciation":
+                frappe.throw(_(
+                    "Amortizatsiya (Depreciation) hisobini kassadan to'lab bo'lmaydi. "
+                    "U Asset moduli orqali avtomatik yoziladi. Boshqa xarajat hisobini tanlang."
+                ))
+
+            # Xarajat hisobi FILIAL company'siga tegishli bo'lishi kerak
+            if filial_company and account_data.company != filial_company:
                 frappe.throw(
-                    _("Xarajat kontragenti '{0}' kompaniyasiga tegishli bo'lishi kerak.").format(self.company)
+                    _("Xarajat hisobi '{0}' filiali ({1}) kompaniyasiga tegishli bo'lishi kerak.").format(
+                        self.filial, filial_company
+                    )
                 )
     
     def _warn_prihod_payable_party(self):
@@ -143,7 +185,7 @@ class Kassa(Document):
                           "Bu operatsiya odatda <b>avans qaytishi</b> uchun ishlatiladi - "
                           "ya'ni avval siz ularga pul bergansiz (Расход), endi ular qaytaryapti.<br><br>"
                           "Joriy balans: {2}<br><br>"
-                          "Agar bu oddiy daromad bo'lsa, 'Прочее лицо' yoki 'Customer' tanlang.").format(
+                          "Agar bu oddiy daromad bo'lsa, 'Customer' tanlang.").format(
                             self.kontragent, self.party_type, current_balance
                         ),
                         title=_("Avans qaytishi haqida"),
@@ -159,7 +201,6 @@ class Kassa(Document):
             self.party_type = None
             self.kontragent = None
             self.expense_kontragent = None
-            self.prochee_kontragent = None
             self.filial = None
             self.source_account = None
             self.source_balance = 0
@@ -174,16 +215,32 @@ class Kassa(Document):
                 self.filial = None
     
     # =========================================================================
-    # JOURNAL ENTRY
+    # ACCOUNTING (Payment Entry / Journal Entry)
     # =========================================================================
-    
+
+    # Kontragent bilan pul muomalasi Payment Entry orqali yuritiladi
+    PARTY_TYPES_PE = ("Customer", "Supplier", "Employee", "Shareholder")
+
     def on_submit(self):
-        """Submit bo'lganda Journal Entry yaratish."""
-        self.create_journal_entry()
-    
+        """Submit bo'lganda mos buxgalteriya hujjatini yaratish.
+
+        - Filiallararo (inter-company) Расход «Расходы» -> 3 hujjat:
+          Payment Entry Pay (to'lovchi) + Payment Entry Receive (xarajat filiali)
+          + Journal Entry (xarajat, xarajat filiali kitobida)
+        - Kontragent (Customer/Supplier/Employee/Shareholder) bilan
+          Приход/Расход  -> Payment Entry (Receive/Pay)
+        - «Расходы» (bir company ichida) va Перемещение -> Journal Entry
+        """
+        if self._is_intercompany_expense():
+            self.create_intercompany_expense()
+        elif self.oborot in ("Приход", "Расход") and self.party_type in self.PARTY_TYPES_PE:
+            self.create_payment_entry()
+        else:
+            self.create_journal_entry()
+
     def on_cancel(self):
-        """Cancel bo'lganda Journal Entry bekor qilish."""
-        self.cancel_journal_entry()
+        """Cancel bo'lganda yaratilgan hujjatni (PE yoki JE) bekor qilish."""
+        self.cancel_accounting_documents()
     
     def create_journal_entry(self):
         """Journal Entry yaratish."""
@@ -214,7 +271,218 @@ class Kassa(Document):
             ),
             indicator="green"
         )
-    
+
+    def create_payment_entry(self):
+        """Kontragent bilan pul muomalasi uchun Payment Entry yaratish.
+
+        Приход -> Receive (Дт kassa / Кт party)
+        Расход -> Pay     (Дт party / Кт kassa)
+        """
+        if not self.company:
+            frappe.throw(_("Company topilmadi"))
+        if not self.kontragent:
+            frappe.throw(_("Kontragent tanlanmagan"))
+
+        party_account = self._get_party_account()
+        if not party_account:
+            frappe.throw(
+                _("'{0}' uchun hisob (Account) topilmadi").format(self.kontragent)
+            )
+
+        payment_type = "Receive" if self.oborot == "Приход" else "Pay"
+        if payment_type == "Receive":
+            paid_from, paid_to = party_account, self.payment_account
+        else:
+            paid_from, paid_to = self.payment_account, party_account
+
+        pe_name = self._submit_payment_entry(
+            payment_type=payment_type,
+            company=self.company,
+            mode_of_payment=self.source_account,
+            party_type=self.party_type,
+            party=self.kontragent,
+            paid_from=paid_from,
+            paid_to=paid_to,
+        )
+        frappe.db.set_value("Kassa", self.name, "payment_entry", pe_name)
+
+        frappe.msgprint(
+            _("Payment Entry yaratildi: {0}").format(
+                f'<a href="/app/payment-entry/{pe_name}">{pe_name}</a>'
+            ),
+            indicator="green"
+        )
+
+    # -------------------------------------------------------------------------
+    # INTER-COMPANY (filiallararo) Расход
+    # -------------------------------------------------------------------------
+
+    def _is_intercompany_expense(self):
+        """Filiallararo xarajatmi? (Приход/Расход + Расходы + boshqa company filial)."""
+        if self.oborot not in ("Приход", "Расход") or self.party_type != "Расходы" or not self.filial:
+            return False
+        target_company = frappe.db.get_value("Kassa Filial", self.filial, "company")
+        return bool(target_company and target_company != self.company)
+
+    def create_intercompany_expense(self):
+        """Filiallararo Расход/Приход uchun 3 hujjat yaratish.
+
+        Расход — to'lovchi (Saripul) -> xarajat filiali (Smart):
+          1) PE Pay     (Saripul): Дт Debtors(target) / Кт Saripul kassa
+          2) PE Receive (Smart):   Дт Smart kassa     / Кт Debtors(payer)
+          3) JE         (Smart):   Дт Xarajat         / Кт Smart kassa
+        Приход — teskari (pul payer kassasiga kiradi, filial xarajati kamayadi).
+        """
+        if not self.company:
+            frappe.throw(_("To'lovchi company topilmadi"))
+
+        filial = frappe.get_doc("Kassa Filial", self.filial)
+        target_company = filial.company
+        if not target_company or not filial.mode_of_payment:
+            frappe.throw(
+                _("'{0}' filiali uchun Kompaniya va Kassa hisobi sozlanmagan").format(
+                    self.filial
+                )
+            )
+
+        # Filial kassa hisobini AYNAN filial company'si bo'yicha olamiz
+        target_cash = frappe.db.get_value(
+            "Mode of Payment Account",
+            {"parent": filial.mode_of_payment, "company": target_company},
+            "default_account",
+        )
+        if not target_cash:
+            frappe.throw(
+                _("'{0}' filial kassasi ('{1}') uchun '{2}' kompaniyasida hisob topilmadi").format(
+                    self.filial, filial.mode_of_payment, target_company
+                )
+            )
+
+        # Har bir companyni ifodalovchi Customer
+        cust_target = self._get_intercompany_customer(target_company)  # Smart
+        cust_payer = self._get_intercompany_customer(self.company)     # Saripul
+        if not cust_target:
+            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(target_company))
+        if not cust_payer:
+            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(self.company))
+
+        from erpnext.accounts.party import get_party_account
+        payer_recv = get_party_account("Customer", cust_target, self.company)
+        target_recv = get_party_account("Customer", cust_payer, target_company)
+
+        is_expense = self.oborot == "Расход"
+
+        if is_expense:
+            # Расход: payer Pay, target Receive, JE Дт xarajat / Кт kassa
+            pe_pay = self._submit_payment_entry(
+                payment_type="Pay", company=self.company,
+                mode_of_payment=self.source_account, party_type="Customer",
+                party=cust_target, paid_from=self.payment_account, paid_to=payer_recv,
+            )
+            pe_recv = self._submit_payment_entry(
+                payment_type="Receive", company=target_company,
+                mode_of_payment=filial.mode_of_payment, party_type="Customer",
+                party=cust_payer, paid_from=target_recv, paid_to=target_cash,
+            )
+        else:
+            # Приход: teskari — payer Receive, target Pay, JE Дт kassa / Кт xarajat
+            pe_pay = self._submit_payment_entry(
+                payment_type="Receive", company=self.company,
+                mode_of_payment=self.source_account, party_type="Customer",
+                party=cust_target, paid_from=payer_recv, paid_to=self.payment_account,
+            )
+            pe_recv = self._submit_payment_entry(
+                payment_type="Pay", company=target_company,
+                mode_of_payment=filial.mode_of_payment, party_type="Customer",
+                party=cust_payer, paid_from=target_cash, paid_to=target_recv,
+            )
+
+        # 3) JE (xarajat) - filial kitobida. Xarajat hisobi allaqachon filial
+        # company'siniki (52001/52002 guruhdan), to'g'ridan-to'g'ri ishlatiladi.
+        je_name = self._submit_expense_je(
+            company=target_company,
+            expense_account=self.expense_kontragent,
+            cash_account=target_cash,
+            expense_debit=is_expense,
+        )
+
+        frappe.db.set_value(
+            "Kassa",
+            self.name,
+            {
+                "payment_entry": pe_pay,
+                "payment_entry_receive": pe_recv,
+                "journal_entry": je_name,
+            },
+        )
+
+        frappe.msgprint(
+            _("Filiallararo xarajat yaratildi:<br>PE Pay: {0}<br>PE Receive: {1}<br>JE: {2}").format(
+                f'<a href="/app/payment-entry/{pe_pay}">{pe_pay}</a>',
+                f'<a href="/app/payment-entry/{pe_recv}">{pe_recv}</a>',
+                f'<a href="/app/journal-entry/{je_name}">{je_name}</a>',
+            ),
+            indicator="green"
+        )
+
+    def _get_intercompany_customer(self, company):
+        """Berilgan companyni ifodalovchi Customer (represents_company)."""
+        return frappe.db.get_value("Customer", {"represents_company": company}, "name")
+
+    def _submit_payment_entry(self, payment_type, company, mode_of_payment,
+                              party_type, party, paid_from, paid_to):
+        """Payment Entry yaratib submit qiladi, nomini qaytaradi."""
+        pe = frappe.new_doc("Payment Entry")
+        pe.payment_type = payment_type
+        pe.company = company
+        pe.posting_date = self.date
+        pe.mode_of_payment = mode_of_payment
+        pe.party_type = party_type
+        pe.party = party
+        pe.paid_from = paid_from
+        pe.paid_to = paid_to
+        pe.paid_from_account_currency = frappe.db.get_value(
+            "Account", paid_from, "account_currency"
+        )
+        pe.paid_to_account_currency = frappe.db.get_value(
+            "Account", paid_to, "account_currency"
+        )
+        pe.paid_amount = self.summa
+        pe.received_amount = self.summa
+        pe.source_exchange_rate = 1
+        pe.target_exchange_rate = 1
+        pe.reference_no = self.name
+        pe.reference_date = self.date
+        pe.insert(ignore_permissions=True)
+        pe.submit()
+        return pe.name
+
+    def _submit_expense_je(self, company, expense_account, cash_account, expense_debit=True):
+        """Xarajat Journal Entry yaratib submit qiladi.
+
+        expense_debit=True  -> Дт xarajat / Кт kassa (Расход)
+        expense_debit=False -> Дт kassa / Кт xarajat (Приход, xarajat kamayadi)
+        """
+        je = frappe.new_doc("Journal Entry")
+        je.voucher_type = "Journal Entry"
+        je.posting_date = self.date
+        je.company = company
+        je.user_remark = f"Kassa: {self.name} - {self.oborot} (inter-company)"
+        exp_dr, exp_cr = (self.summa, 0) if expense_debit else (0, self.summa)
+        je.append("accounts", {
+            "account": expense_account,
+            "debit_in_account_currency": exp_dr,
+            "credit_in_account_currency": exp_cr,
+        })
+        je.append("accounts", {
+            "account": cash_account,
+            "debit_in_account_currency": exp_cr,
+            "credit_in_account_currency": exp_dr,
+        })
+        je.insert(ignore_permissions=True)
+        je.submit()
+        return je.name
+
     def _add_transfer_entries(self, je):
         """Перемещение - hisobdan hisobga o'tkazma."""
         # Target - Debit
@@ -255,14 +523,13 @@ class Kassa(Document):
                 "debit_in_account_currency": 0,
                 "credit_in_account_currency": self.summa
             })
-        elif self.party_type == "Прочее лицо":
-            income_account = self._get_default_income_account()
+        elif self.party_type in DIVIDEND_ACCOUNT_NUMBERS:
             je.append("accounts", {
-                "account": income_account,
+                "account": self._get_dividend_account(),
                 "debit_in_account_currency": 0,
                 "credit_in_account_currency": self.summa
             })
-    
+
     def _add_expense_entries(self, je):
         """Расход - pul chiqishi."""
         # Kontragent - Debit
@@ -281,56 +548,61 @@ class Kassa(Document):
                 "debit_in_account_currency": self.summa,
                 "credit_in_account_currency": 0
             })
-        elif self.party_type == "Прочее лицо":
-            expense_account = self._get_default_expense_account()
+        elif self.party_type in DIVIDEND_ACCOUNT_NUMBERS:
             je.append("accounts", {
-                "account": expense_account,
+                "account": self._get_dividend_account(),
                 "debit_in_account_currency": self.summa,
                 "credit_in_account_currency": 0
             })
-        
+
         # Cash - Credit
         je.append("accounts", {
             "account": self.payment_account,
             "debit_in_account_currency": 0,
             "credit_in_account_currency": self.summa
         })
-    
+
+    def _get_dividend_account(self):
+        """Divident kontragent turi uchun hisobni (raqam bo'yicha, to'lovchi
+        company'da) qaytaradi. Har companyda 3200/3201 bir xil raqamli."""
+        num = DIVIDEND_ACCOUNT_NUMBERS.get(self.party_type)
+        acc = frappe.db.get_value(
+            "Account",
+            {"company": self.company, "account_number": num, "is_group": 0},
+            "name",
+        )
+        if not acc:
+            frappe.throw(
+                _("'{0}' uchun '{1}' kompaniyasida {2} raqamli divident hisobi topilmadi").format(
+                    self.party_type, self.company, num
+                )
+            )
+        return acc
+
     def _get_party_account(self):
         """Party uchun account olish."""
         from erpnext.accounts.party import get_party_account
         return get_party_account(self.party_type, self.kontragent, self.company)
     
-    def _get_default_income_account(self):
-        """Default income account."""
-        account = frappe.db.get_value("Company", self.company, "default_income_account")
-        if not account:
-            account = frappe.db.get_value(
-                "Account",
-                {"company": self.company, "root_type": "Income", "is_group": 0},
-                "name"
-            )
-        return account
-    
-    def _get_default_expense_account(self):
-        """Default expense account."""
-        account = frappe.db.get_value("Company", self.company, "default_expense_account")
-        if not account:
-            account = frappe.db.get_value(
-                "Account",
-                {"company": self.company, "root_type": "Expense", "is_group": 0},
-                "name"
-            )
-        return account
-    
-    def cancel_journal_entry(self):
-        """Journal Entry bekor qilish."""
-        if self.journal_entry:
-            je = frappe.get_doc("Journal Entry", self.journal_entry)
-            if je.docstatus == 1:
-                je.cancel()
+    def cancel_accounting_documents(self):
+        """Yaratilgan hujjatlarni teskari tartibda bekor qilish.
+
+        Inter-company'da: JE -> PE Receive -> PE Pay tartibida.
+        """
+        targets = [
+            ("journal_entry", "Journal Entry"),
+            ("payment_entry_receive", "Payment Entry"),
+            ("payment_entry", "Payment Entry"),
+        ]
+        for fieldname, doctype in targets:
+            name = self.get(fieldname)
+            if not name:
+                continue
+            doc = frappe.get_doc(doctype, name)
+            if doc.docstatus == 1:
+                doc.cancel()
                 frappe.msgprint(
-                    _("Journal Entry bekor qilindi: {0}").format(self.journal_entry),
+                    _("{0} bekor qilindi: {1}").format(doctype, name),
                     indicator="orange"
                 )
 
@@ -465,4 +737,45 @@ def get_filtered_mode_of_payments(doctype, txt, searchfield, start, page_len, fi
         "exclude": exclude or "",
         "start": start,
         "page_len": page_len
+    })
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_filial_expense_accounts(doctype, txt, searchfield, start, page_len, filters):
+    """«Xarajat kontragenti» uchun query: tanlangan FILIAL company'sining
+    expense_group (52001/52002) ostidagi barcha leaf xarajat hisoblari."""
+    filial = filters.get("filial")
+    if not filial:
+        return []
+
+    fc = frappe.db.get_value(
+        "Kassa Filial", filial, ["company", "expense_group"], as_dict=True
+    )
+    if not fc or not fc.company or not fc.expense_group:
+        return []
+
+    grp = frappe.db.get_value(
+        "Account", fc.expense_group, ["lft", "rgt"], as_dict=True
+    )
+    if not grp:
+        return []
+
+    return frappe.db.sql("""
+        SELECT name
+        FROM `tabAccount`
+        WHERE company = %(company)s
+            AND is_group = 0
+            AND root_type = 'Expense'
+            AND lft > %(lft)s AND rgt < %(rgt)s
+            AND name LIKE %(txt)s
+        ORDER BY name
+        LIMIT %(start)s, %(page_len)s
+    """, {
+        "company": fc.company,
+        "lft": grp.lft,
+        "rgt": grp.rgt,
+        "txt": f"%{txt}%",
+        "start": start,
+        "page_len": page_len,
     })

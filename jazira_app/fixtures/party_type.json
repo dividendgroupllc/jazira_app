@@ -6,13 +6,5 @@
   "modified": "2026-01-08 17:06:07.644117",
   "name": "Расходы",
   "party_type": "Расходы"
- },
- {
-  "account_type": "Payable",
-  "docstatus": 0,
-  "doctype": "Party Type",
-  "modified": "2026-01-08 17:06:07.648827",
-  "name": "Прочее лицо",
-  "party_type": "Прочее лицо"
  }
 ]
