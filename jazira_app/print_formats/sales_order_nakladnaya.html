@@ -14,10 +14,10 @@
 		padding: 0 !important;
 		width: 100% !important;
 		max-width: none !important;
-		color: #172033;
+		color: #000;
 		font-family: Calibri, Arial, sans-serif;
-		font-size: 12px;
-		line-height: 1.32;
+		font-size: 14px;
+		line-height: 1.35;
 	}
 
 	.print-format * {
@@ -28,7 +28,7 @@
 		width: 100%;
 	}
 
-	.header-table,
+	.meta-table,
 	.party-table,
 	.items-table,
 	.signature-table {
@@ -37,66 +37,30 @@
 		table-layout: fixed;
 	}
 
-	.header-table {
-		margin-bottom: 8px;
-		border-bottom: 2px solid #0f4c81;
-	}
-
-	.header-left {
-		width: 55%;
-		padding: 0 0 6px;
-		vertical-align: bottom;
-	}
-
-	.header-right {
-		width: 45%;
-		padding: 0 0 6px;
-		vertical-align: bottom;
-	}
-
-	.title {
-		margin: 0;
-		color: #0f4c81;
-		font-size: 24px;
-		font-style: italic;
-		font-weight: 700;
-		letter-spacing: 0;
-	}
-
-	.company {
-		margin-top: 2px;
-		color: #64748b;
-		font-size: 10px;
-		font-weight: 700;
-	}
-
+	/* Tepadagi keng jadval: Рақам / Сана / Босма санаси */
 	.meta-table {
-		width: 100%;
-		border-collapse: collapse;
-		font-size: 11px;
+		margin-bottom: 8px;
+	}
+
+	.meta-table th {
+		padding: 6px 8px;
+		border: 1px solid #000;
+		text-align: center;
+		font-size: 17px;
+		font-weight: 800 !important;
+		color: #000 !important;
 	}
 
 	.meta-table td {
-		padding: 4px 6px;
-		border: 1px solid #cbd5e1;
-	}
-
-	.meta-label {
-		width: 42%;
-		background: #eef4fa;
-		color: #334155;
-		text-align: right;
-		font-weight: 700;
-	}
-
-	.meta-value {
-		color: #0f172a;
-		font-weight: 700;
+		padding: 6px 8px;
+		border: 1px solid #000;
+		text-align: center;
+		font-size: 13px;
 	}
 
 	.party-table {
 		margin-bottom: 8px;
-		border: 1px solid #cbd5e1;
+		border: 1px solid #000;
 	}
 
 	.party-table td {
@@ -106,21 +70,19 @@
 
 	.field-label {
 		margin-bottom: 2px;
-		color: #64748b;
-		font-size: 8.5px;
+		font-size: 10.5px;
 		font-weight: 700;
 		text-transform: uppercase;
 	}
 
 	.field-value {
 		min-height: 14px;
-		color: #111827;
-		font-size: 11px;
+		font-size: 13px;
 		font-weight: 700;
 	}
 
 	.items-table {
-		border: 1px solid #0f4c81;
+		border: 1px solid #000;
 	}
 
 	.items-table col.idx {
@@ -140,26 +102,21 @@
 	}
 
 	.items-table th {
-		padding: 5px 4px;
-		border: 1px solid #0f4c81;
-		background: #0f4c81;
-		color: #fff;
+		padding: 6px 4px;
+		border: 1px solid #000;
 		text-align: center;
-		font-size: 11px;
-		font-weight: 700;
+		font-size: 16px;
+		font-weight: 800 !important;
+		color: #000 !important;
 	}
 
 	.items-table td {
-		height: 22px;
-		padding: 4px 6px;
-		border: 1px solid #d6e0ea;
+		height: 24px;
+		padding: 5px 6px;
+		border: 1px solid #000;
 		vertical-align: middle;
-		font-size: 10.5px;
+		font-size: 12.5px;
 		page-break-inside: avoid;
-	}
-
-	.items-table tbody tr:nth-child(even) td {
-		background: #f8fbfe;
 	}
 
 	.idx-cell,
@@ -168,21 +125,16 @@
 	}
 
 	.item-name {
-		color: #111827;
 		font-weight: 700;
 	}
 
 	.item-code {
 		margin-top: 1px;
-		color: #64748b;
-		font-size: 8.5px;
+		font-size: 10.5px;
 	}
 
 	.signature-table {
-		width: 100%;
 		margin-top: 28px;
-		border-collapse: collapse;
-		table-layout: fixed;
 		page-break-inside: avoid;
 	}
 
@@ -190,44 +142,35 @@
 		width: 33.33%;
 		padding: 0 12px;
 		text-align: left;
-		color: #334155;
-		font-size: 11px;
+		font-size: 13px;
 		vertical-align: bottom;
 	}
 
 	.signature-line {
 		margin-top: 34px;
-		border-top: 1px solid #334155;
+		border-top: 1px solid #000;
 		padding-top: 5px;
-		font-size: 13px;
+		font-size: 15px;
 		font-weight: 700;
 	}
 </style>
 
 <div class="sheet">
-	<table class="header-table">
-		<tr>
-			<td class="header-left">
-				<h1 class="title">Буюртма</h1>
-				<div class="company">{{ doc.company }}</div>
-			</td>
-			<td class="header-right">
-				<table class="meta-table">
-					<tr>
-						<td class="meta-label">Рақам</td>
-						<td class="meta-value">{{ doc.name }}</td>
-					</tr>
-					<tr>
-						<td class="meta-label">Сана</td>
-						<td class="meta-value">{{ doc.get_formatted("transaction_date") }}</td>
-					</tr>
-					<tr>
-						<td class="meta-label">Босма санаси</td>
-						<td class="meta-value">{{ frappe.utils.format_datetime(frappe.utils.now_datetime(), "dd-MM-yyyy HH:mm") }}</td>
-					</tr>
-				</table>
-			</td>
-		</tr>
+	<table class="meta-table">
+		<thead>
+			<tr>
+				<th>Рақам</th>
+				<th>Сана</th>
+				<th>Босма санаси</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>{{ doc.name }}</td>
+				<td>{{ doc.get_formatted("transaction_date") }}</td>
+				<td>{{ frappe.utils.format_datetime(frappe.utils.now_datetime(), "dd-MM-yyyy HH:mm") }}</td>
+			</tr>
+		</tbody>
 	</table>
 
 	<table class="party-table">
