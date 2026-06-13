@@ -37,11 +37,14 @@ class Kassa(Document):
             frappe.throw(_("Summa 0 dan katta bo'lishi kerak"))
 
     def validate_kontragent(self):
-        """Inter-company (company-ifodalovchi) Customer/Supplier ni qo'lda
-        tanlash taqiqlanadi — ular avtomatik ishlatiladi."""
-        if self.party_type in ("Customer", "Supplier") and self.kontragent:
+        """- CUSTOMER: company-ifodalovchi ichki kontragentni qo'lda tanlash
+             taqiqlanadi (self-dealing).
+           - SUPPLIER: faqat o'z company'sini ifodalovchi supplier taqiqlanadi
+             (o'ziga to'lov). Boshqa company supplier'iga (masalan Sklad)
+             filialdan to'lash mumkin."""
+        if self.party_type == "Customer" and self.kontragent:
             represents = frappe.db.get_value(
-                self.party_type, self.kontragent, "represents_company"
+                "Customer", self.kontragent, "represents_company"
             )
             if represents:
                 frappe.throw(_(
@@ -49,6 +52,26 @@ class Kassa(Document):
                     "qo'lda tanlab bo'lmaydi. Filiallararo xarajat uchun «Расходы» "
                     "turini va «Filial» maydonini ishlating."
                 ).format(self.kontragent))
+
+        if self.party_type == "Supplier" and self.kontragent:
+            represents = frappe.db.get_value(
+                "Supplier", self.kontragent, "represents_company"
+            )
+            payer_company = self._payer_company()
+            if represents and payer_company and represents == payer_company:
+                frappe.throw(_(
+                    "'{0}' supplier '{1}' kompaniyasini ifodalaydi — to'lov ham shu "
+                    "kompaniya kassasidan. Bu o'ziga to'lov bo'lib qoladi. Boshqa "
+                    "supplier yoki boshqa kassani tanlang."
+                ).format(self.kontragent, payer_company))
+
+    def _payer_company(self):
+        """To'lovchi (Qaysi hisobdan) company'si."""
+        if self.company:
+            return self.company
+        if self.source_account:
+            return get_mode_of_payment_info(self.source_account).get("company")
+        return None
     
     def set_company_and_accounts(self):
         """Mode of Payment'dan company va account olish."""
@@ -233,6 +256,8 @@ class Kassa(Document):
         """
         if self._is_intercompany_expense():
             self.create_intercompany_expense()
+        elif self._is_supplier_via_sklad():
+            self.create_supplier_payment_via_sklad()
         elif self.oborot in ("Приход", "Расход") and self.party_type in self.PARTY_TYPES_PE:
             self.create_payment_entry()
         else:
@@ -425,6 +450,95 @@ class Kassa(Document):
             indicator="green"
         )
 
+    # -------------------------------------------------------------------------
+    # SUPPLIER -> SKLAD orqali to'lov (filialdan)
+    # -------------------------------------------------------------------------
+
+    def _get_sklad_company(self):
+        """Sklad company — Sklad Settings'dagi main_warehouse kompaniyasi."""
+        mw = frappe.db.get_single_value("Sklad Settings", "main_warehouse")
+        if not mw:
+            return None
+        return frappe.db.get_value("Warehouse", mw, "company")
+
+    def _is_supplier_via_sklad(self):
+        """Расход + Supplier + to'lovchi filial (Sklad emas) -> Sklad orqali yo'naltirish."""
+        if self.oborot != "Расход" or self.party_type != "Supplier":
+            return False
+        sklad_company = self._get_sklad_company()
+        return bool(sklad_company and self.company and self.company != sklad_company)
+
+    def create_supplier_payment_via_sklad(self):
+        """Filialdan supplierga to'lovni Sklad orqali yo'naltiradi.
+
+          1) PE Pay     (Filial): Дт Debtors(Sklad)  / Кт Filial kassa
+          2) PE Receive (Sklad):  Дт Sklad kassa      / Кт Debtors(Filial)
+          3) PE Pay     (Sklad):  Дт Creditors(Supplier) / Кт Sklad kassa
+             (supplier = Sklad o'zi bo'lsa, 3-qadam tushadi)
+        """
+        if not self.company:
+            frappe.throw(_("To'lovchi company topilmadi"))
+        if not self.kontragent:
+            frappe.throw(_("Supplier tanlanmagan"))
+
+        sklad_company = self._get_sklad_company()
+        sklad_cash = frappe.db.get_value("Company", sklad_company, "default_cash_account")
+        if not sklad_cash:
+            frappe.throw(
+                _("'{0}' kompaniyasida Default Cash Account sozlanmagan").format(sklad_company)
+            )
+
+        cust_sklad = self._get_intercompany_customer(sklad_company)   # filial kitobida Sklad
+        cust_payer = self._get_intercompany_customer(self.company)    # Sklad kitobida filial
+        if not cust_sklad:
+            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(sklad_company))
+        if not cust_payer:
+            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(self.company))
+
+        from erpnext.accounts.party import get_party_account
+        filial_recv = get_party_account("Customer", cust_sklad, self.company)
+        sklad_recv = get_party_account("Customer", cust_payer, sklad_company)
+
+        # 1) Filial -> Sklad
+        pe_pay = self._submit_payment_entry(
+            payment_type="Pay", company=self.company,
+            mode_of_payment=self.source_account, party_type="Customer",
+            party=cust_sklad, paid_from=self.payment_account, paid_to=filial_recv,
+        )
+        # 2) Sklad qabul qiladi
+        pe_recv = self._submit_payment_entry(
+            payment_type="Receive", company=sklad_company,
+            mode_of_payment=None, party_type="Customer",
+            party=cust_payer, paid_from=sklad_recv, paid_to=sklad_cash,
+        )
+
+        # 3) Sklad -> Supplier (supplier = Sklad o'zi bo'lmasa)
+        supplier_company = frappe.db.get_value("Supplier", self.kontragent, "represents_company")
+        pe_supplier = None
+        if supplier_company != sklad_company:
+            supplier_payable = get_party_account("Supplier", self.kontragent, sklad_company)
+            pe_supplier = self._submit_payment_entry(
+                payment_type="Pay", company=sklad_company,
+                mode_of_payment=None, party_type="Supplier",
+                party=self.kontragent, paid_from=sklad_cash, paid_to=supplier_payable,
+            )
+
+        frappe.db.set_value("Kassa", self.name, {
+            "payment_entry": pe_pay,
+            "payment_entry_receive": pe_recv,
+            "payment_entry_supplier": pe_supplier,
+        })
+
+        msg = _("Filialdan Sklad orqali to'lov:<br>PE Pay: {0}<br>PE Receive: {1}").format(
+            f'<a href="/app/payment-entry/{pe_pay}">{pe_pay}</a>',
+            f'<a href="/app/payment-entry/{pe_recv}">{pe_recv}</a>',
+        )
+        if pe_supplier:
+            msg += _("<br>PE Pay (Supplier): {0}").format(
+                f'<a href="/app/payment-entry/{pe_supplier}">{pe_supplier}</a>'
+            )
+        frappe.msgprint(msg, indicator="green")
+
     def _get_intercompany_customer(self, company):
         """Berilgan companyni ifodalovchi Customer (represents_company)."""
         return frappe.db.get_value("Customer", {"represents_company": company}, "name")
@@ -591,6 +705,7 @@ class Kassa(Document):
         """
         targets = [
             ("journal_entry", "Journal Entry"),
+            ("payment_entry_supplier", "Payment Entry"),
             ("payment_entry_receive", "Payment Entry"),
             ("payment_entry", "Payment Entry"),
         ]

@@ -35,6 +35,7 @@
   "journal_entry",
   "payment_entry",
   "payment_entry_receive",
+  "payment_entry_supplier",
   "company",
   "amended_from"
  ],
@@ -240,6 +241,13 @@
    "fieldname": "payment_entry_receive",
    "fieldtype": "Link",
    "label": "Payment Entry (Receive)",
+   "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry_supplier",
+   "fieldtype": "Link",
+   "label": "Payment Entry (Supplier)",
    "options": "Payment Entry",
    "read_only": 1
   },

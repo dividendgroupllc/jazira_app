@@ -35,17 +35,19 @@ frappe.ui.form.on('Kassa', {
         // Party Type - barchasi
         frm.set_query('party_type', () => ({}));
 
-        // Kontragent — inter-company (company-ifodalovchi) Customer/Supplier
-        // larni yashiramiz: ular avtomatik ishlatiladi, qo'lda tanlanmaydi.
+        // Kontragent filtri:
+        //  - Customer: company-ifodalovchi (inter-company) larni yashiramiz
+        //    (ular avtomatik ishlatiladi, self-dealing oldini olish).
+        //  - Supplier: hammasi (Jazira Sklad supplier ham — Sklad orqali to'lov).
         frm.set_query('kontragent', () => {
             const party_type = frm.doc.party_type;
-            if (party_type === 'Customer' || party_type === 'Supplier') {
+            if (party_type === 'Customer') {
                 return {
-                    filters: {
-                        disabled: 0,
-                        represents_company: ['is', 'not set']
-                    }
+                    filters: { disabled: 0, represents_company: ['is', 'not set'] }
                 };
+            }
+            if (party_type === 'Supplier') {
+                return { filters: { disabled: 0 } };
             }
             return {};
         });
