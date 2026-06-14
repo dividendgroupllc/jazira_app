@@ -90,7 +90,11 @@
 	}
 
 	.items-table col.item {
-		width: 58%;
+		width: 50%;
+	}
+
+	.items-table col.check {
+		width: 8%;
 	}
 
 	.items-table col.qty {
@@ -186,6 +190,7 @@
 		<colgroup>
 			<col class="idx">
 			<col class="item">
+			<col class="check">
 			<col class="qty">
 			<col class="uom">
 		</colgroup>
@@ -193,6 +198,7 @@
 			<tr>
 				<th>№</th>
 				<th>Маҳсулот</th>
+				<th>✓</th>
 				<th>Сони</th>
 				<th>Ўлчов бирлиги</th>
 			</tr>
@@ -207,6 +213,7 @@
 							<div class="item-code">{{ item.item_code }}</div>
 						{% endif %}
 					</td>
+					<td class="center"></td>
 					<td class="center">{{ qty(item.qty) }}</td>
 					<td class="center">{{ item.uom or item.stock_uom or "" }}</td>
 				</tr>
@@ -216,7 +223,7 @@
 
 	<table class="signature-table">
 		<tr>
-			<td><div class="signature-line">Омборчи</div></td>
+			<td><div class="signature-line">Складчи</div></td>
 			<td><div class="signature-line">Етказиб берувчи</div></td>
 			<td><div class="signature-line">Қабул қилувчи</div></td>
 		</tr>
