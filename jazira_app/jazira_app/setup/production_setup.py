@@ -81,10 +81,12 @@ def run_all():
 	)
 	from jazira_app.jazira_app.setup.intercompany_setup import (
 		ensure_intercompany_customers,
+		ensure_customer_filial_field,
 	)
 
 	print("=== 1. Inter-company Customer'lar ===")
 	ensure_intercompany_customers()
+	ensure_customer_filial_field()
 	print("\n=== 2. Divident Party Type'lar ===")
 	create_dividend_party_types()
 	print("\n=== 3. Divident hisob nomlari ===")

@@ -12,6 +12,32 @@ Supplier bor — shuning uchun yetishmaganlar uchun Customer yaratamiz.
 import frappe
 
 
+def ensure_customer_filial_field():
+	"""Customer'ga 'Filial (Jazira)' maydonini qo'shadi.
+
+	Sklad <-> filial inter-company Kassa oqimi uchun: oddiy mijoz (masalan
+	«Нахт Клиент Халк Банки») qaysi filial kompaniyasini ifodalashini
+	belgilaydi. Belgilanса, Sklad kassasidan/ga pul harakati o'sha filial
+	kitobida ham (default kassa) aks etadi.
+	"""
+	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+
+	create_custom_fields({
+		"Customer": [{
+			"fieldname": "jazira_filial_company",
+			"label": "Filial (Jazira)",
+			"fieldtype": "Link",
+			"options": "Company",
+			"insert_after": "represents_company",
+			"description": (
+				"Sklad bilan inter-company kassa uchun: bu mijoz qaysi "
+				"filial kompaniyasini ifodalaydi."
+			),
+		}]
+	})
+	print("✅ Customer.jazira_filial_company maydoni tayyor")
+
+
 def ensure_intercompany_customers():
 	"""Har bir company uchun represents_company Customer mavjudligini ta'minlaydi."""
 	customer_group = (

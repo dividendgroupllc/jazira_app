@@ -20,7 +20,10 @@ def run():
 	)
 	from jazira_app.jazira_app.overrides.purchase_order import ensure_custom_fields
 	from jazira_app.jazira_app.setup.dividend_setup import create_dividend_party_types
-	from jazira_app.jazira_app.setup.intercompany_setup import ensure_intercompany_customers
+	from jazira_app.jazira_app.setup.intercompany_setup import (
+		ensure_intercompany_customers,
+		ensure_customer_filial_field,
+	)
 
 	tasks = [
 		create_sales_order_print_format,
@@ -28,6 +31,7 @@ def run():
 		ensure_custom_fields,
 		create_dividend_party_types,
 		ensure_intercompany_customers,
+		ensure_customer_filial_field,
 	]
 	for fn in tasks:
 		try:
