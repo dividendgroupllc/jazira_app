@@ -11,8 +11,7 @@ def execute(filters=None):
     validate_filters(filters)
     columns = get_columns()
     data = get_data(filters)
-    report_summary = get_report_summary(data)
-    return columns, data, None, None, report_summary
+    return columns, data
 
 
 def validate_filters(filters):
@@ -24,14 +23,14 @@ def validate_filters(filters):
 
 def get_columns():
     return [
-        {"fieldname": "purchase_invoice", "label": _("Ҳужжат"), "fieldtype": "Link", "options": "Purchase Invoice", "width": 170},
         {"fieldname": "posting_date", "label": _("Сана"), "fieldtype": "Date", "width": 100},
-        {"fieldname": "company", "label": _("Компания"), "fieldtype": "Link", "options": "Company", "width": 150},
         {"fieldname": "supplier", "label": _("Етказиб берувчи"), "fieldtype": "Data", "width": 180},
         {"fieldname": "item_name", "label": _("Товар номи"), "fieldtype": "Data", "width": 240},
         {"fieldname": "qty", "label": _("Дона"), "fieldtype": "Float", "width": 100, "precision": 3},
-        {"fieldname": "rate", "label": _("Нарxи"), "fieldtype": "Currency", "width": 120},
+        {"fieldname": "rate", "label": _("Нархи"), "fieldtype": "Currency", "width": 120},
         {"fieldname": "amount", "label": _("Суммаси"), "fieldtype": "Currency", "width": 140},
+        {"fieldname": "company", "label": _("Компания"), "fieldtype": "Link", "options": "Company", "width": 150},
+        {"fieldname": "purchase_invoice", "label": _("Ҳужжат"), "fieldtype": "Link", "options": "Purchase Invoice", "width": 170},
     ]
 
 
@@ -79,19 +78,3 @@ def get_data(filters):
         })
 
     return rows
-
-
-def get_report_summary(data):
-    total_amount = 0
-    total_qty = 0
-    for r in data:
-        # jami qatorni hisobga olmaymiz (item_name == 'ЖАМИ')
-        if r.get("item_name") == _("ЖАМИ"):
-            continue
-        total_amount += flt(r.get("amount"))
-        total_qty += flt(r.get("qty"))
-
-    return [
-        {"label": _("Жами сумма"), "value": total_amount, "datatype": "Currency", "indicator": "Green"},
-        {"label": _("Қаторлар сони"), "value": max(len(data) - 1, 0) if data else 0, "datatype": "Int"},
-    ]
