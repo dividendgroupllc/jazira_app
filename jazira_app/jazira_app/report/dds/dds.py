@@ -39,9 +39,9 @@ def get_columns():
     return [
         {"fieldname": "posting_date", "label": _("Сана"), "fieldtype": "Date", "width": 100},
         {"fieldname": "account", "label": _("Касса счёт"), "fieldtype": "Link", "options": "Account", "width": 180},
-        {"fieldname": "direction", "label": _("Кирим/Чиқим"), "fieldtype": "Data", "width": 100},
         {"fieldname": "description", "label": _("Категория"), "fieldtype": "Data", "width": 250},
-        {"fieldname": "summa", "label": _("Сумма"), "fieldtype": "Currency", "width": 130},
+        {"fieldname": "kirim", "label": _("Кирим"), "fieldtype": "Currency", "width": 130},
+        {"fieldname": "chiqim", "label": _("Чиқим"), "fieldtype": "Currency", "width": 130},
         {"fieldname": "remarks", "label": _("Изоҳ"), "fieldtype": "Data", "width": 200},
         {"fieldname": "voucher_type", "label": _("Тип"), "fieldtype": "Data", "width": 0, "hidden": 1},
         {"fieldname": "voucher_no", "label": _("Документ"), "fieldtype": "Dynamic Link", "options": "voucher_type", "width": 160},
@@ -131,8 +131,8 @@ def get_data(filters):
             "remarks": get_remarks(row, pe_info, je_remarks, kassa_remarks),
             "voucher_type": row.voucher_type,
             "voucher_no": row.voucher_no,
-            "kirim": kirim,
-            "chiqim": chiqim,
+            "kirim": kirim or None,
+            "chiqim": chiqim or None,
         })
 
     final_data = list(data)
