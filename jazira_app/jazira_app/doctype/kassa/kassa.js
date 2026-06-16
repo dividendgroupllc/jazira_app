@@ -36,17 +36,13 @@ frappe.ui.form.on('Kassa', {
         frm.set_query('party_type', () => ({}));
 
         // Kontragent filtri:
-        //  - Customer: company-ifodalovchi (inter-company) larni yashiramiz
-        //    (ular avtomatik ishlatiladi, self-dealing oldini olish).
+        //  - Customer: hammasi ko'rinadi — internal (filialni ifodalovchi)
+        //    customerlar ham (Sklad -> filial uchun: Jazira Smart va h.k.).
+        //    O'ziga to'lov (self-dealing) server validatsiyasida bloklanadi.
         //  - Supplier: hammasi (Jazira Sklad supplier ham — Sklad orqali to'lov).
         frm.set_query('kontragent', () => {
             const party_type = frm.doc.party_type;
-            if (party_type === 'Customer') {
-                return {
-                    filters: { disabled: 0, represents_company: ['is', 'not set'] }
-                };
-            }
-            if (party_type === 'Supplier') {
+            if (party_type === 'Customer' || party_type === 'Supplier') {
                 return { filters: { disabled: 0 } };
             }
             return {};
@@ -92,6 +88,7 @@ frappe.ui.form.on('Kassa', {
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
         frm.set_value('filial', '');
+        frm.set_value('employee_filial', '');
         frm.set_value('company', '');
         frm.set_value('payment_account', '');
         frm.set_value('payment_account_2', '');
@@ -242,6 +239,7 @@ frappe.ui.form.on('Kassa', {
         frm.set_value('kontragent', '');
         frm.set_value('expense_kontragent', '');
         frm.set_value('filial', '');
+        frm.set_value('employee_filial', '');
 
         frm.trigger('toggle_fields');
     },

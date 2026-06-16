@@ -21,6 +21,7 @@
   "party_type",
   "column_break_kontragent",
   "filial",
+  "employee_filial",
   "section_break_expense",
   "kontragent",
   "expense_kontragent",
@@ -154,6 +155,14 @@
    "label": "Filial",
    "mandatory_depends_on": "eval:doc.party_type=='Расходы'",
    "options": "Kassa Filial"
+  },
+  {
+   "fieldname": "employee_filial",
+   "fieldtype": "Link",
+   "label": "Filial",
+   "options": "Company",
+   "depends_on": "eval:doc.party_type=='Employee'",
+   "mandatory_depends_on": "eval:doc.party_type=='Employee'"
   },
   {
    "depends_on": "eval:doc.oborot && doc.oborot!='Перемещение'",

@@ -46,12 +46,16 @@ class Kassa(Document):
             represents = frappe.db.get_value(
                 "Customer", self.kontragent, "represents_company"
             )
-            if represents:
+            payer_company = self._payer_company()
+            # Faqat o'ziga to'lovni (self-dealing) bloklaymiz: kontragent
+            # to'lovchi company'ning o'zini ifodalasa. Boshqa filialni
+            # ifodalovchi internal customer (Sklad -> filial) RUXSAT etiladi.
+            if represents and payer_company and represents == payer_company:
                 frappe.throw(_(
-                    "'{0}' — bu kompaniyani ifodalovchi ichki kontragent, uni "
-                    "qo'lda tanlab bo'lmaydi. Filiallararo xarajat uchun «Расходы» "
-                    "turini va «Filial» maydonini ishlating."
-                ).format(self.kontragent))
+                    "'{0}' — to'lovchi kompaniyaning ({1}) o'zini ifodalovchi "
+                    "ichki kontragent. Bu o'ziga to'lov bo'lib qoladi. Boshqa "
+                    "kontragent yoki boshqa kassani tanlang."
+                ).format(self.kontragent, payer_company))
 
         if self.party_type == "Supplier" and self.kontragent:
             represents = frappe.db.get_value(
@@ -260,6 +264,8 @@ class Kassa(Document):
             self.create_supplier_payment_via_sklad()
         elif self._is_sklad_to_filial():
             self.create_sklad_to_filial_payment()
+        elif self._is_employee_via_filial():
+            self.create_employee_payment()
         elif self.oborot in ("Приход", "Расход") and self.party_type in self.PARTY_TYPES_PE:
             self.create_payment_entry()
         else:
@@ -541,9 +547,119 @@ class Kassa(Document):
             )
         frappe.msgprint(msg, indicator="green")
 
+    # -------------------------------------------------------------------------
+    # EMPLOYEE to'lovi (filial orqali)
+    # -------------------------------------------------------------------------
+
+    def _is_employee_via_filial(self):
+        """Employee to'lovi — qaysi filial ishchisi ekani belgilangan."""
+        return bool(
+            self.oborot in ("Приход", "Расход")
+            and self.party_type == "Employee"
+            and self.kontragent
+            and self.employee_filial
+        )
+
+    def create_employee_payment(self):
+        """Employee to'lovi.
+
+        A) TO'G'RIDAN: manba kassa = filialning o'zi -> oddiy 1 PE
+           (filial o'z kassasidan employee'ga).
+        B) SKLAD ORQALI: manba = Sklad, employee boshqa filialniki ->
+           Sklad -> filial -> employee (3 PE). Employee filial kitobida
+           to'lanadi, Sklad filialni moliyalashtiradi.
+        """
+        from erpnext.accounts.party import get_party_account
+
+        filial_company = self.employee_filial
+        source_company = self.company
+
+        # A) TO'G'RIDAN
+        if source_company == filial_company:
+            self.create_payment_entry()
+            return
+
+        # B) SKLAD ORQALI
+        sklad_company = self._get_sklad_company()
+        if source_company != sklad_company:
+            frappe.throw(_(
+                "Filiallar o'rtasida to'g'ridan to'lov mumkin emas. Manba kassa "
+                "filialning o'zi yoki Sklad bo'lishi kerak."
+            ))
+
+        filial_cash = frappe.db.get_value("Company", filial_company, "default_cash_account")
+        if not filial_cash:
+            frappe.throw(_("'{0}' kompaniyasida Default Cash Account sozlanmagan").format(filial_company))
+
+        cust_filial = self._get_intercompany_customer(filial_company)   # Sklad kitobida filial
+        sup_sklad = self._get_intercompany_supplier(sklad_company)      # filial kitobida Sklad
+        if not cust_filial:
+            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(filial_company))
+        if not sup_sklad:
+            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Supplier topilmadi").format(sklad_company))
+
+        sklad_cust_account = get_party_account("Customer", cust_filial, sklad_company)
+        filial_sup_account = get_party_account("Supplier", sup_sklad, filial_company)
+        emp_account = get_party_account("Employee", self.kontragent, filial_company)
+
+        if self.oborot == "Расход":
+            # 1) Sklad pul beradi filialga
+            pe_sklad = self._submit_payment_entry(
+                payment_type="Pay", company=sklad_company,
+                mode_of_payment=self.source_account, party_type="Customer",
+                party=cust_filial, paid_from=self.payment_account, paid_to=sklad_cust_account,
+            )
+            # 2) Filial qabul qiladi (Sklad = supplier)
+            pe_filial = self._submit_payment_entry(
+                payment_type="Receive", company=filial_company,
+                mode_of_payment=None, party_type="Supplier",
+                party=sup_sklad, paid_from=filial_sup_account, paid_to=filial_cash,
+            )
+            # 3) Filial employee'ga to'laydi
+            pe_emp = self._submit_payment_entry(
+                payment_type="Pay", company=filial_company,
+                mode_of_payment=None, party_type="Employee",
+                party=self.kontragent, paid_from=filial_cash, paid_to=emp_account,
+            )
+        else:  # Приход — employee pul qaytaradi -> filial -> Sklad
+            pe_emp = self._submit_payment_entry(
+                payment_type="Receive", company=filial_company,
+                mode_of_payment=None, party_type="Employee",
+                party=self.kontragent, paid_from=emp_account, paid_to=filial_cash,
+            )
+            pe_filial = self._submit_payment_entry(
+                payment_type="Pay", company=filial_company,
+                mode_of_payment=None, party_type="Supplier",
+                party=sup_sklad, paid_from=filial_cash, paid_to=filial_sup_account,
+            )
+            pe_sklad = self._submit_payment_entry(
+                payment_type="Receive", company=sklad_company,
+                mode_of_payment=self.source_account, party_type="Customer",
+                party=cust_filial, paid_from=sklad_cust_account, paid_to=self.payment_account,
+            )
+
+        frappe.db.set_value("Kassa", self.name, {
+            "payment_entry": pe_sklad,
+            "payment_entry_receive": pe_filial,
+            "payment_entry_supplier": pe_emp,
+        })
+        frappe.msgprint(
+            _("Employee to'lovi (Sklad → {0} → ishchi):<br>PE Sklad: {1}<br>PE Filial: {2}<br>PE Employee: {3}").format(
+                filial_company,
+                f'<a href="/app/payment-entry/{pe_sklad}">{pe_sklad}</a>',
+                f'<a href="/app/payment-entry/{pe_filial}">{pe_filial}</a>',
+                f'<a href="/app/payment-entry/{pe_emp}">{pe_emp}</a>',
+            ),
+            indicator="green"
+        )
+
     def _get_intercompany_customer(self, company):
         """Berilgan companyni ifodalovchi Customer (represents_company)."""
         return frappe.db.get_value("Customer", {"represents_company": company}, "name")
+
+    def _get_intercompany_supplier(self, company):
+        """Berilgan companyni ifodalovchi Supplier (represents_company)."""
+        return frappe.db.get_value("Supplier", {"represents_company": company}, "name")
 
     # -------------------------------------------------------------------------
     # SKLAD <-> FILIAL (oddiy mijoz orqali) — supplier-via-sklad'ning teskarisi
@@ -561,8 +677,19 @@ class Kassa(Document):
         sklad_company = self._get_sklad_company()
         if not sklad_company or self.company != sklad_company:
             return False
-        filial_company = frappe.db.get_value("Customer", self.kontragent, "jazira_filial_company")
+        filial_company = self._filial_company_of(self.kontragent)
         return bool(filial_company and filial_company != sklad_company)
+
+    def _filial_company_of(self, customer):
+        """Customer qaysi filial company'ni ifodalaydi.
+
+        Birinchi navbatda internal customer (represents_company), bo'lmasa
+        jazira_filial_company (oddiy mijoz uchun qo'lda bog'lash) ishlatiladi.
+        """
+        return (
+            frappe.db.get_value("Customer", customer, "represents_company")
+            or frappe.db.get_value("Customer", customer, "jazira_filial_company")
+        )
 
     def create_sklad_to_filial_payment(self):
         """Sklad <-> filial pul harakati uchun 2 Payment Entry yaratadi.
@@ -580,46 +707,47 @@ class Kassa(Document):
             frappe.throw(_("Kontragent tanlanmagan"))
 
         sklad_company = self.company
-        filial_company = frappe.db.get_value("Customer", self.kontragent, "jazira_filial_company")
+        filial_company = self._filial_company_of(self.kontragent)
         filial_cash = frappe.db.get_value("Company", filial_company, "default_cash_account")
         if not filial_cash:
             frappe.throw(
                 _("'{0}' kompaniyasida Default Cash Account sozlanmagan").format(filial_company)
             )
 
-        # Sklad kitobida — tanlangan oddiy mijoz hisobi
+        # Sklad kitobida — tanlangan mijoz (filial = Sklad uchun Customer)
         cust_account_sklad = self._get_party_account()
-        # Filial kitobida — Sklad'ni ifodalovchi ichki customer
-        cust_sklad = self._get_intercompany_customer(sklad_company)
-        if not cust_sklad:
-            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(sklad_company))
-        filial_clearing = get_party_account("Customer", cust_sklad, filial_company)
+        # Filial kitobida — Sklad'ni ifodalovchi ichki SUPPLIER
+        # (filial uchun Sklad = yetkazib beruvchi, Kreditorka hisobi).
+        sup_sklad = self._get_intercompany_supplier(sklad_company)
+        if not sup_sklad:
+            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Supplier topilmadi").format(sklad_company))
+        filial_clearing = get_party_account("Supplier", sup_sklad, filial_company)
 
         if self.oborot == "Расход":
-            # 1) Sklad pul beradi: Кт Sklad kassa / Дт mijoz
+            # 1) Sklad pul beradi: Кт Sklad kassa / Дт mijoz (Debtors)
             pe_sklad = self._submit_payment_entry(
                 payment_type="Pay", company=sklad_company,
                 mode_of_payment=self.source_account, party_type="Customer",
                 party=self.kontragent, paid_from=self.payment_account, paid_to=cust_account_sklad,
             )
-            # 2) Filial qabul qiladi: Дт Filial kassa / Кт Debtors(Sklad)
+            # 2) Filial qabul qiladi: Дт Filial kassa / Кт Creditors(Supplier Sklad)
             pe_filial = self._submit_payment_entry(
                 payment_type="Receive", company=filial_company,
-                mode_of_payment=None, party_type="Customer",
-                party=cust_sklad, paid_from=filial_clearing, paid_to=filial_cash,
+                mode_of_payment=None, party_type="Supplier",
+                party=sup_sklad, paid_from=filial_clearing, paid_to=filial_cash,
             )
         else:  # Приход — filial -> Sklad
-            # 1) Sklad qabul qiladi: Дт Sklad kassa / Кт mijoz
+            # 1) Sklad qabul qiladi: Дт Sklad kassa / Кт mijoz (Debtors)
             pe_sklad = self._submit_payment_entry(
                 payment_type="Receive", company=sklad_company,
                 mode_of_payment=self.source_account, party_type="Customer",
                 party=self.kontragent, paid_from=cust_account_sklad, paid_to=self.payment_account,
             )
-            # 2) Filial pul beradi: Кт Filial kassa / Дт Debtors(Sklad)
+            # 2) Filial pul beradi: Кт Filial kassa / Дт Creditors(Supplier Sklad)
             pe_filial = self._submit_payment_entry(
                 payment_type="Pay", company=filial_company,
-                mode_of_payment=None, party_type="Customer",
-                party=cust_sklad, paid_from=filial_cash, paid_to=filial_clearing,
+                mode_of_payment=None, party_type="Supplier",
+                party=sup_sklad, paid_from=filial_cash, paid_to=filial_clearing,
             )
 
         frappe.db.set_value("Kassa", self.name, {
