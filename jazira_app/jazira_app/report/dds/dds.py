@@ -43,8 +43,7 @@ def get_columns():
         {"fieldname": "kirim", "label": _("Кирим"), "fieldtype": "Currency", "width": 130},
         {"fieldname": "chiqim", "label": _("Чиқим"), "fieldtype": "Currency", "width": 130},
         {"fieldname": "remarks", "label": _("Изоҳ"), "fieldtype": "Data", "width": 200},
-        {"fieldname": "voucher_type", "label": _("Тип"), "fieldtype": "Data", "width": 0, "hidden": 1},
-        {"fieldname": "voucher_no", "label": _("Документ"), "fieldtype": "Dynamic Link", "options": "voucher_type", "width": 160},
+        {"fieldname": "kassa_doc", "label": _("Документ"), "fieldtype": "Link", "options": "Kassa", "width": 160},
     ]
 
 
@@ -64,8 +63,8 @@ def get_data(filters):
     je_info = get_journal_entry_info_batch(je_vouchers)
     je_remarks = get_journal_entry_remarks_batch(je_vouchers)
 
-    # --- YANGI: Kassa remarkslarini batch olish ---
-    kassa_remarks = get_kassa_remarks_batch(all_vouchers)
+    # --- YANGI: Kassa hujjati (nom + izoh) batch olish ---
+    kassa_map = get_kassa_map_batch(all_vouchers)
 
     data = []
 
@@ -127,8 +126,10 @@ def get_data(filters):
             "description": strip_category_prefix(info["description"]),
             "category": info["category"],
             "summa": kirim if kirim else chiqim,
-            # --- YANGI: kassa_remarks birinchi, fallback PE/JE ---
-            "remarks": get_remarks(row, pe_info, je_remarks, kassa_remarks),
+            # --- YANGI: kassa izohi birinchi, fallback PE/JE ---
+            "remarks": get_remarks(row, pe_info, je_remarks, kassa_map),
+            # --- YANGI: Документ ustuni Kassa hujjatini ko'rsatadi ---
+            "kassa_doc": (kassa_map.get(row.voucher_no) or {}).get("name"),
             "voucher_type": row.voucher_type,
             "voucher_no": row.voucher_no,
             "kirim": kirim or None,
@@ -243,19 +244,19 @@ def get_journal_entry_remarks_batch(voucher_nos):
     return {e.name: (e.user_remark or "") for e in entries}
 
 
-def get_kassa_remarks_batch(voucher_nos):
+def get_kassa_map_batch(voucher_nos):
     """
-    Kassa doctype dan izoh (primechaniya) olish.
+    Kassa doctype'ni voucher (PE/JE) bo'yicha topish.
     jazira_app Kassa bir nechta link maydoniga ega: journal_entry, payment_entry,
-    payment_entry_receive, payment_entry_supplier (Payment Entry / Journal Entry nomi).
-    Qaytaradi: {voucher_no: remarks_string}
+    payment_entry_receive, payment_entry_supplier.
+    Qaytaradi: {voucher_no: {"name": kassa_nomi, "remark": izoh}}
     """
     if not voucher_nos:
         return {}
 
     voucher_set = set(voucher_nos)
     entries = frappe.db.sql("""
-        SELECT journal_entry, payment_entry, payment_entry_receive,
+        SELECT name, journal_entry, payment_entry, payment_entry_receive,
                payment_entry_supplier, primechaniya
         FROM `tabKassa`
         WHERE docstatus = 1
@@ -267,25 +268,25 @@ def get_kassa_remarks_batch(voucher_nos):
 
     result = {}
     for e in entries:
-        remark = e.primechaniya or ""
+        info = {"name": e.name, "remark": e.primechaniya or ""}
         for link in (e.journal_entry, e.payment_entry,
                      e.payment_entry_receive, e.payment_entry_supplier):
             if link and link in voucher_set:
-                result[link] = remark
+                result[link] = info
     return result
 
 
-def get_remarks(row, pe_info, je_remarks, kassa_remarks=None):
+def get_remarks(row, pe_info, je_remarks, kassa_map=None):
     """
     Izoh olish tartibi:
-    1. Kassa.remarks (linked_entry = voucher_no bo'lgan yozuv)
+    1. Kassa.primechaniya (voucher_no bog'langan Kassa)
     2. Fallback: Payment Entry.remarks yoki Journal Entry.user_remark
     """
     voucher = row.voucher_no
 
     # 1. Kassa dan olish (ustuvor)
-    if kassa_remarks and voucher in kassa_remarks:
-        kassa_remark = kassa_remarks[voucher]
+    if kassa_map and voucher in kassa_map:
+        kassa_remark = kassa_map[voucher].get("remark")
         if kassa_remark:
             return kassa_remark
 
@@ -312,9 +313,8 @@ def resolve_transaction_info(row, pe_info, je_info, cash_accounts):
     if row.party_type and row.party:
         party_name = get_party_name(row.party_type, row.party)
         display_name = party_name or row.party
-        suffix = "Приход" if flt(row.debit_in_account_currency) > 0 else "Расход"
         return {
-            "description": f"{display_name} ({suffix})",
+            "description": display_name,
             "category": get_category_from_party_type(row.party_type),
             "party_type": row.party_type,
             "party": row.party,
@@ -328,9 +328,8 @@ def resolve_transaction_info(row, pe_info, je_info, cash_accounts):
         if pe.party_type and pe.party:
             party_name = get_party_name(pe.party_type, pe.party)
             display_name = party_name or pe.party
-            suffix = "Приход" if pe.payment_type == "Receive" else "Расход"
             return {
-                "description": f"{display_name} ({suffix})",
+                "description": display_name,
                 "category": get_category_from_party_type(pe.party_type),
                 "party_type": pe.party_type,
                 "party": pe.party,
