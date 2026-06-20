@@ -41,7 +41,7 @@ def validate_filters(filters):
 def get_columns():
     return [
         {"label": _("Sana"), "fieldname": "posting_date", "fieldtype": "Date", "width": 100},
-        {"label": _("Hujjat turi"), "fieldname": "voucher_type", "fieldtype": "Data", "width": 140},
+        {"label": _("Hujjat turi"), "fieldname": "voucher_type_label", "fieldtype": "Data", "width": 140},
         {"label": _("Hujjat №"), "fieldname": "voucher_no", "fieldtype": "Dynamic Link", "options": "voucher_type", "width": 150},
         {"label": _("Izoh"), "fieldname": "remarks", "fieldtype": "Data", "width": 200},
         {"label": _("Debet"), "fieldname": "debit", "fieldtype": "Currency", "width": 130},
@@ -61,14 +61,11 @@ def get_data(filters):
         "closing_balance": 0
     }
     
-    party_type = filters.get("party_type")
-    party = filters.get("party")
     from_date = filters.get("from_date")
-    to_date = filters.get("to_date")
-    
+
     # 1. BOSHLANG'ICH QOLDIQ
-    opening = get_opening_balance(party_type, party, from_date)
-    
+    opening = get_opening_balance(filters)
+
     opening_debit = flt(opening) if opening > 0 else 0
     opening_credit = abs(flt(opening)) if opening < 0 else 0
     
@@ -79,7 +76,8 @@ def get_data(filters):
     
     data.append({
         "posting_date": from_date,
-        "voucher_type": "Boshlang'ich qoldiq",
+        "voucher_type": "",
+        "voucher_type_label": "Boshlang'ich qoldiq",
         "voucher_no": "",
         "remarks": "",
         "debit": opening_debit,
@@ -87,9 +85,9 @@ def get_data(filters):
         "balance": flt(opening),
         "is_opening": 1
     })
-    
+
     # 2. TRANZAKSIYALAR
-    entries = get_gl_entries(party_type, party, from_date, to_date)
+    entries = get_gl_entries(filters)
     running_balance = flt(opening)
     
     for e in entries:
@@ -108,7 +106,8 @@ def get_data(filters):
         
         data.append({
             "posting_date": e.posting_date,
-            "voucher_type": get_label(e.voucher_type),
+            "voucher_type": e.voucher_type,
+            "voucher_type_label": get_label(e.voucher_type),
             "voucher_no": e.voucher_no,
             "remarks": get_remarks(e.voucher_type, e.voucher_no),
             "debit": debit,
@@ -121,25 +120,43 @@ def get_data(filters):
     return data, summary
 
 
-def get_opening_balance(party_type, party, from_date):
-    result = frappe.db.sql("""
+def _build_scope(filters):
+    """GL Entry uchun party asosidagi shartni (sanasiz) qaytaradi."""
+    params = {
+        "party_type": filters.get("party_type"),
+        "party": filters.get("party"),
+    }
+    conds = ["is_cancelled = 0", "party_type = %(party_type)s", "party = %(party)s"]
+
+    company = filters.get("company")
+    if company:
+        conds.append("company = %(company)s")
+        params["company"] = company
+
+    return " AND ".join(conds), params
+
+
+def get_opening_balance(filters):
+    where_sql, params = _build_scope(filters)
+    params = dict(params, from_date=filters.get("from_date"))
+    result = frappe.db.sql(f"""
         SELECT SUM(debit) - SUM(credit) as balance
         FROM `tabGL Entry`
-        WHERE party_type = %s AND party = %s 
-            AND posting_date < %s AND is_cancelled = 0
-    """, (party_type, party, from_date), as_dict=True)
-    
+        WHERE {where_sql} AND posting_date < %(from_date)s
+    """, params, as_dict=True)
+
     return flt(result[0].balance) if result and result[0].balance else 0
 
 
-def get_gl_entries(party_type, party, from_date, to_date):
-    return frappe.db.sql("""
+def get_gl_entries(filters):
+    where_sql, params = _build_scope(filters)
+    params = dict(params, from_date=filters.get("from_date"), to_date=filters.get("to_date"))
+    return frappe.db.sql(f"""
         SELECT posting_date, voucher_type, voucher_no, debit, credit
         FROM `tabGL Entry`
-        WHERE party_type = %s AND party = %s
-            AND posting_date BETWEEN %s AND %s AND is_cancelled = 0
+        WHERE {where_sql} AND posting_date BETWEEN %(from_date)s AND %(to_date)s
         ORDER BY posting_date, creation
-    """, (party_type, party, from_date, to_date), as_dict=True)
+    """, params, as_dict=True)
 
 
 def get_remarks(voucher_type, voucher_no):

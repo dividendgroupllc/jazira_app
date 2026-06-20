@@ -17,10 +17,17 @@ frappe.query_reports["Akt Sverka"] = {
             reqd: 1
         },
         {
+            fieldname: "company",
+            label: __("Kompaniya"),
+            fieldtype: "Link",
+            options: "Company",
+            default: frappe.defaults.get_user_default("Company")
+        },
+        {
             fieldname: "party_type",
             label: __("Kontragent turi"),
-            fieldtype: "Link",
-            options: "Party Type",
+            fieldtype: "Select",
+            options: "Customer\nSupplier\nEmployee",
             default: "Supplier",
             reqd: 1,
             on_change: function() {
@@ -31,8 +38,15 @@ frappe.query_reports["Akt Sverka"] = {
             fieldname: "party",
             label: __("Kontragent"),
             fieldtype: "Dynamic Link",
-            options: "party_type",
-            reqd: 1
+            reqd: 1,
+            get_options: function() {
+                var party_type = frappe.query_report.get_filter_value("party_type");
+                var party = frappe.query_report.get_filter_value("party");
+                if (party && !party_type) {
+                    frappe.throw(__("Avval Kontragent turini tanlang"));
+                }
+                return party_type;
+            }
         }
     ],
     

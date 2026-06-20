@@ -17,10 +17,17 @@ frappe.query_reports["Kontragent Otchet"] = {
             reqd: 1
         },
         {
+            fieldname: "company",
+            label: __("Kompaniya"),
+            fieldtype: "Link",
+            options: "Company",
+            default: frappe.defaults.get_user_default("Company")
+        },
+        {
             fieldname: "party_type",
             label: __("Kontragent turi"),
-            fieldtype: "Link",
-            options: "Party Type",
+            fieldtype: "Select",
+            options: "Customer\nSupplier\nEmployee",
             default: "Customer",
             reqd: 1,
             on_change: function() {
@@ -31,7 +38,13 @@ frappe.query_reports["Kontragent Otchet"] = {
             fieldname: "party",
             label: __("Kontragent"),
             fieldtype: "Dynamic Link",
-            options: "party_type"
+            get_options: function() {
+                var party_type = frappe.query_report.get_filter_value("party_type");
+                if (!party_type) {
+                    return null;
+                }
+                return party_type;
+            }
         }
     ],
     
