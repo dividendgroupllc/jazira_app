@@ -236,6 +236,7 @@
    "fieldname": "journal_entry",
    "fieldtype": "Link",
    "label": "Journal Entry",
+   "no_copy": 1,
    "options": "Journal Entry",
    "read_only": 1
   },
@@ -243,6 +244,7 @@
    "fieldname": "payment_entry",
    "fieldtype": "Link",
    "label": "Payment Entry",
+   "no_copy": 1,
    "options": "Payment Entry",
    "read_only": 1
   },
@@ -250,6 +252,7 @@
    "fieldname": "payment_entry_receive",
    "fieldtype": "Link",
    "label": "Payment Entry (Receive)",
+   "no_copy": 1,
    "options": "Payment Entry",
    "read_only": 1
   },
@@ -257,6 +260,7 @@
    "fieldname": "payment_entry_supplier",
    "fieldtype": "Link",
    "label": "Payment Entry (Supplier)",
+   "no_copy": 1,
    "options": "Payment Entry",
    "read_only": 1
   },

@@ -258,6 +258,11 @@ class Kassa(Document):
           Приход/Расход  -> Payment Entry (Receive/Pay)
         - «Расходы» (bir company ichida) va Перемещение -> Journal Entry
         """
+        # Himoya: duplicate/amend orqali nusxalangan eski havolalarni tozalaymiz.
+        # Aks holda submit faqat o'zi yaratgan maydonlarni yangilaydi va qolgan
+        # eski havolalar (asl hujjatnikilar) cancel paytida xato bekor qilinardi.
+        self._reset_accounting_links()
+
         if self._is_intercompany_expense():
             self.create_intercompany_expense()
         elif self._is_supplier_via_sklad():
@@ -274,6 +279,36 @@ class Kassa(Document):
     def on_cancel(self):
         """Cancel bo'lganda yaratilgan hujjatni (PE yoki JE) bekor qilish."""
         self.cancel_accounting_documents()
+
+    # Submit yaratadigan buxgalteriya havola maydonlari
+    ACCOUNTING_LINK_FIELDS = (
+        "payment_entry",
+        "payment_entry_receive",
+        "payment_entry_supplier",
+        "journal_entry",
+    )
+
+    def _reset_accounting_links(self):
+        """Buxgalteriya havola maydonlarini bo'shatish.
+
+        Duplicate/amend qilinganda bu maydonlar asl hujjatdan nusxalanib qolishi
+        mumkin. Submit faqat o'zi yaratgan maydonni yangilaydi, shu sabab eski
+        (asl hujjatnikiga ishora qiluvchi) havola qolib ketishi va cancel paytida
+        ASL hujjatning PE/JE'sini xato bekor qilishi mumkin edi.
+        """
+        for fieldname in self.ACCOUNTING_LINK_FIELDS:
+            self.set(fieldname, None)
+        # DB'dagi nusxalangan eski qiymatlarni ham tozalaymiz: no_copy o'rnatilgunga
+        # qadar duplicate qilingan qoralamalarda bu qiymatlar bazaga yozilib qolgan
+        # bo'lishi mumkin. Keyin create_* metodlari faqat o'zi yaratgan to'g'ri
+        # havolalarni qayta yozadi.
+        if not self.is_new():
+            frappe.db.set_value(
+                "Kassa",
+                self.name,
+                {f: None for f in self.ACCOUNTING_LINK_FIELDS},
+                update_modified=False,
+            )
     
     def create_journal_entry(self):
         """Journal Entry yaratish."""
