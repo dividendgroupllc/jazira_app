@@ -248,29 +248,34 @@ def get_summary_table(summary, filters):
     closing_credit = abs(closing) if closing < 0 else 0
     
     return f"""
-    <div style="margin-bottom:20px;">
+    <div class="akt-sverka-summary" style="margin-bottom:20px;">
+        <style>
+            /* Rangli qatorlar och fonli — dark rejimda ham o'qilishi uchun to'q matn majburlaymiz */
+            .akt-sverka-summary tr.akt-hl td,
+            .akt-sverka-summary tr.akt-hl th {{ color:#1f2937 !important; }}
+        </style>
         <p><strong>Kontragent:</strong> {party} | <strong>Davr:</strong> {from_date} — {to_date}</p>
         <table class="table table-bordered" style="width:auto;min-width:450px;">
             <thead>
-                <tr style="background:#fffacd;">
+                <tr class="akt-hl" style="background:#fffacd;">
                     <th>Hujjat turi</th>
                     <th style="text-align:right;width:140px;">Debet</th>
                     <th style="text-align:right;width:140px;">Kredit</th>
                 </tr>
             </thead>
             <tbody>
-                <tr style="background:#e6f7ff;">
+                <tr class="akt-hl" style="background:#e6f7ff;">
                     <td><strong>Boshlang'ich qoldiq</strong></td>
                     <td style="text-align:right;">{fmt(opening_debit)}</td>
                     <td style="text-align:right;">{fmt(opening_credit)}</td>
                 </tr>
                 {rows}
-                <tr style="background:#d4edda;font-weight:bold;">
+                <tr class="akt-hl" style="background:#d4edda;font-weight:bold;">
                     <td>JAMI</td>
                     <td style="text-align:right;">{fmt(summary.get("total_debit", 0))}</td>
                     <td style="text-align:right;">{fmt(summary.get("total_credit", 0))}</td>
                 </tr>
-                <tr style="background:#fff3cd;font-weight:bold;">
+                <tr class="akt-hl" style="background:#fff3cd;font-weight:bold;">
                     <td>Yakuniy qoldiq</td>
                     <td style="text-align:right;">{fmt(closing_debit)}</td>
                     <td style="text-align:right;">{fmt(closing_credit)}</td>
