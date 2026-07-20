@@ -89,8 +89,8 @@ class StockService:
         if not all([item_code, qty > 0, bom]):
             return None
         
-        # Get raw materials from BOM
-        raw_materials = bom_service.get_raw_materials(bom, qty)
+        # Get raw materials from BOM (fully exploded down to raw materials)
+        raw_materials = bom_service.get_raw_materials(bom, qty, config.company)
         if not raw_materials:
             return None
         

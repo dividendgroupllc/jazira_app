@@ -43,57 +43,42 @@ class BOMService:
             "name"
         )
     
-    def get_raw_materials(self, bom_name: str, qty: float) -> List[RawMaterial]:
+    def get_raw_materials(self, bom_name: str, qty: float, company: str) -> List[RawMaterial]:
         """
-        Get raw materials from BOM with calculated quantities.
-        
+        Get exploded raw materials from BOM with calculated quantities.
+
+        Uses ERPNext's BOM Explosion Item table (fetch_exploded=1) so that
+        semi-finished sub-assemblies are resolved down to their underlying
+        raw materials, instead of stopping at the BOM's direct 1st-level rows.
+
         Args:
             bom_name: BOM document name
             qty: Required quantity of finished item
-            
+            company: Company (required by ERPNext's BOM explosion helper)
+
         Returns:
             List of RawMaterial objects
         """
         if not bom_name or qty <= 0:
             return []
-        
-        # Get BOM items
-        bom_items = self._get_bom_items(bom_name)
-        
-        # Get BOM base quantity
-        bom_qty = frappe.db.get_value("BOM", bom_name, "quantity") or 1
-        
-        # Calculate required quantities
-        materials = []
-        for item in bom_items:
-            required_qty = (item["stock_qty"] / bom_qty) * qty
-            
-            materials.append(RawMaterial(
-                item_code=item["item_code"],
-                qty=required_qty,
-                uom=item["stock_uom"] or item["uom"]
-            ))
-        
-        return materials
-    
-    def _get_bom_items(self, bom_name: str) -> List[Dict]:
-        """Get BOM items using query builder."""
-        from frappe.query_builder import DocType
-        
-        BOMItem = DocType("BOM Item")
-        
-        return (
-            frappe.qb.from_(BOMItem)
-            .select(
-                BOMItem.item_code,
-                BOMItem.qty,
-                BOMItem.uom,
-                BOMItem.stock_qty,
-                BOMItem.stock_uom
-            )
-            .where(BOMItem.parent == bom_name)
-            .run(as_dict=True)
+
+        from erpnext.manufacturing.doctype.bom.bom import get_bom_items_as_dict
+
+        item_dict = get_bom_items_as_dict(
+            bom=bom_name,
+            company=company,
+            qty=qty,
+            fetch_exploded=1
         )
+
+        return [
+            RawMaterial(
+                item_code=item["item_code"],
+                qty=item["qty"],
+                uom=item["stock_uom"]
+            )
+            for item in item_dict.values()
+        ]
     
     def categorize_items_by_bom(self, items: List[Dict]) -> Dict[str, List[Dict]]:
         """
