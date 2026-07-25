@@ -48,8 +48,35 @@ def _is_inter_company_si(doc):
 	return bool(frappe.db.get_value("Customer", doc.customer, "is_internal_customer"))
 
 
+def _historical_valuation_rate(item_code, warehouse, as_of_date):
+	"""as_of_date holatidagi oxirgi Stock Ledger Entry'dan valuation_rate.
+
+	Topilmasa (yoki as_of_date bo'lmasa) — joriy Bin valuation_rate'ga qaytadi.
+	Eski (masalan iyun) SI amend qilinganda bugungi emas, o'sha davr tannarxi
+	ishlatilishi uchun kerak — xuddi ury.ury.hooks.sklad_sales_order dagidek.
+	"""
+	if as_of_date:
+		rate = frappe.db.get_value(
+			"Stock Ledger Entry",
+			{
+				"item_code": item_code,
+				"warehouse": warehouse,
+				"posting_date": ["<=", as_of_date],
+				"is_cancelled": 0,
+			},
+			"valuation_rate",
+			order_by="posting_date desc, posting_time desc, creation desc",
+		)
+		if rate:
+			return rate
+
+	return frappe.db.get_value(
+		"Bin", {"item_code": item_code, "warehouse": warehouse}, "valuation_rate"
+	) or 0
+
+
 def _recalculate_rates(doc):
-	"""Joriy valuation_rate × markup bilan SI narxlarini yangilaydi."""
+	"""SI sanasidagi (posting_date) valuation_rate × markup bilan narxlarni yangilaydi."""
 	branch_company = frappe.db.get_value("Customer", doc.customer, "represents_company")
 	if not branch_company:
 		return
@@ -66,11 +93,9 @@ def _recalculate_rates(doc):
 
 	multiplier = 1 + (markup_percent / 100)
 	for item in doc.items:
-		valuation_rate = frappe.db.get_value(
-			"Bin",
-			{"item_code": item.item_code, "warehouse": main_warehouse},
-			"valuation_rate",
-		) or 0
+		valuation_rate = _historical_valuation_rate(
+			item.item_code, main_warehouse, doc.posting_date
+		)
 
 		if not valuation_rate:
 			continue
