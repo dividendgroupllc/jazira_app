@@ -91,9 +91,27 @@ def _recalculate_rates(doc):
 	if not main_warehouse:
 		frappe.throw("Sklad Settings da 'Main Warehouse' belgilanmagan — SI amend uchun kerak.")
 
+	# Asl (bekor qilingan) hujjatning o'z incoming_rate'i — ERPNext aynan shu
+	# operatsiya uchun hisoblab qo'ygan haqiqiy tannarx (Prodaja Sheets ham
+	# shundan o'qiydi). зг/yarim tayyor mahsulotlarda kun ichida bir necha marta
+	# tannarx o'zgargani uchun "sana bo'yicha eng oxirgi SLE" qidiruvi (pastdagi
+	# fallback) boshqa partiyaning qiymatini tanlab qo'yishi mumkin — asl
+	# hujjatning o'zidagi qiymat esa aynan shu qatorga tegishli.
+	original_rates = {}
+	if doc.amended_from:
+		original_rates = {
+			row.item_code: row.incoming_rate
+			for row in frappe.get_all(
+				"Sales Invoice Item",
+				filters={"parent": doc.amended_from},
+				fields=["item_code", "incoming_rate"],
+			)
+			if row.incoming_rate
+		}
+
 	multiplier = 1 + (markup_percent / 100)
 	for item in doc.items:
-		valuation_rate = _historical_valuation_rate(
+		valuation_rate = original_rates.get(item.item_code) or _historical_valuation_rate(
 			item.item_code, main_warehouse, doc.posting_date
 		)
 
