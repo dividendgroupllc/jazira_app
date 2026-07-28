@@ -4,6 +4,7 @@ from contextlib import contextmanager
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 
 from jazira_app.jazira_app.services.bom_service import bom_service
 
@@ -105,8 +106,12 @@ class StockService:
         se.bom_no = bom
         se.fg_completed_qty = qty
         
-        # Add raw materials (consumed)
+        # Add raw materials (consumed). Exploded BOM rows that round to zero
+        # (e.g. a trace ingredient at low sold qty) are skipped — ERPNext
+        # rejects the whole Stock Entry if any row's qty rounds to 0.
         for rm in raw_materials:
+            if flt(rm.qty, 3) <= 0:
+                continue
             se.append("items", {
                 "item_code": rm.item_code,
                 "qty": rm.qty,
