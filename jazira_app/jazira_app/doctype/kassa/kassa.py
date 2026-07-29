@@ -320,7 +320,9 @@ class Kassa(Document):
         je.posting_date = self.date
         je.company = self.company
         je.user_remark = f"Kassa: {self.name} - {self.oborot}"
-        
+        if self.primechaniya:
+            je.user_remark += f" | {self.primechaniya}"
+
         if self.oborot == "Перемещение":
             self._add_transfer_entries(je)
         elif self.oborot == "Приход":
@@ -844,6 +846,8 @@ class Kassa(Document):
         pe.target_exchange_rate = 1
         pe.reference_no = self.name
         pe.reference_date = self.date
+        if self.primechaniya:
+            pe.remarks = self.primechaniya
         pe.insert(ignore_permissions=True)
         pe.submit()
         return pe.name
@@ -859,6 +863,8 @@ class Kassa(Document):
         je.posting_date = self.date
         je.company = company
         je.user_remark = f"Kassa: {self.name} - {self.oborot} (inter-company)"
+        if self.primechaniya:
+            je.user_remark += f" | {self.primechaniya}"
         exp_dr, exp_cr = (self.summa, 0) if expense_debit else (0, self.summa)
         je.append("accounts", {
             "account": expense_account,

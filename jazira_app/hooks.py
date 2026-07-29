@@ -124,7 +124,9 @@ doc_events = {
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/jazira_app/css/jazira_app.css"
-# app_include_js = "/assets/jazira_app/js/jazira_app.js"
+app_include_js = [
+    "/assets/jazira_app/js/pl_pdf_button.js",
+]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/jazira_app/css/jazira_app.css"
