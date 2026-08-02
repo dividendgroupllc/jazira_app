@@ -1,5 +1,5 @@
 const JAZIRA_ALLOCATION_COMPANIES = [
-    'Jazira sklad',
+    'Jazira Sklad',
     'Jazira Smart',
     'Jazira Saripul',
     'Jazira Xalq Banki'

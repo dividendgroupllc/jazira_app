@@ -10,7 +10,7 @@ from frappe.utils import cint, flt, get_first_day, get_last_day, getdate
 ALLOCATION_REMARK_PREFIX = "Jazira Expense Allocation:"
 
 DEFAULT_COMPANIES = (
-    "Jazira sklad",
+    "Jazira Sklad",
     "Jazira Smart",
     "Jazira Saripul",
     "Jazira Xalq Banki",
