@@ -52,7 +52,6 @@ def execute(filters=None):
 	opex_accounts = {
 		"operational": fetch_group_accounts(company, group_paths.get("52001")),
 		"admin": fetch_group_accounts(company, group_paths.get("52002")),
-		"other_indirect": fetch_direct_children(company, group_paths.get("5200"), exclude_prefixes=("52001", "52002")),
 	}
 	pdata = aggregate(period_list, gl_rows, order_rows, group_paths)
 
@@ -185,30 +184,6 @@ def fetch_group_accounts(company, parent_account_name):
 	return [(a.account_name, a.acc_num or a.account_name) for a in accounts]
 
 
-def fetch_direct_children(company, parent_account_name, exclude_prefixes=()):
-	"""fetch_group_accounts kabi, lekin ostidagi raqamli sub-guruhlar
-	(masalan 52001/52002)ning o'zini chiqarib tashlaydi — faqat to'g'ridan-to'g'ri
-	guruhsiz farzand hisoblarni qaytaradi (masalan 5200 ning o'zига tegishli,
-	52001/52002 ostiga tushmagan hisoblar)."""
-	if not parent_account_name:
-		return []
-	accounts = frappe.db.sql("""
-		SELECT TRIM(IFNULL(account_number, '')) AS acc_num, account_name, is_group
-		FROM `tabAccount`
-		WHERE company = %s AND parent_account = %s
-		ORDER BY account_number, account_name
-	""", (company, parent_account_name), as_dict=True)
-	out = []
-	for a in accounts:
-		if a.is_group:
-			continue
-		num = a.acc_num or ""
-		if any(num.startswith(p) for p in exclude_prefixes):
-			continue
-		out.append((a.account_name, num or a.account_name))
-	return out
-
-
 # ─── Aggregation ─────────────────────────────────────────────────────────────
 
 def _period_key(posting_date, period_list):
@@ -225,7 +200,7 @@ def _fk(period_key):
 def aggregate(period_list, gl_rows, order_rows, group_paths):
 	def empty():
 		return dict(revenue=0, cogs=0, operational={}, admin={},
-					other_indirect={}, other_uncategorized={}, orders=0)
+					other_uncategorized={}, orders=0)
 
 	pdata = {p["key"]: empty() for p in period_list}
 
@@ -256,10 +231,13 @@ def aggregate(period_list, gl_rows, order_rows, group_paths):
 			d["admin"][key] = d["admin"].get(key, 0) + net
 
 		elif ind_path and r.parent_account == ind_path:
-			d["other_indirect"][key] = d["other_indirect"].get(key, 0) + net
+			# 5200 ostidagi guruhsiz (52001/52002 dan tashqari) eski hisoblar —
+			# foydalanuvchi talabiga ko'ra hisobotga umuman kiritilmaydi.
+			continue
 
 		else:
-			# Hech qaysi ma'lum toifaga tushmagan Expense hisob — yo'qotib
+			# Hech qaysi ma'lum toifaga tushmagan Expense hisob (masalan
+			# 5200 daraxti tashqarisidagi kutilmagan hisob) — yo'qotib
 			# qo'ymaslik uchun "Бошқа харажатлар"ga tushadi.
 			d["other_uncategorized"][key] = d["other_uncategorized"].get(key, 0) + net
 
@@ -343,33 +321,16 @@ def build_rows(period_list, pdata, opex_accounts=None):
 		row_type="percent", level=1, is_percent=True))
 	rows.append(divider())
 
-	# ── Операционные расходы (52001) ─────────────────────────────────────────
-	op_total = per_period(lambda d: sum(d["operational"].values()))
-	rows.append(mk("Операционные расходы", value_map=op_total, row_type="sub", level=1, is_cost=True, indent=0))
-	for acc_name, acc_key in opex_accounts.get("operational", []):
-		arow = {_fk(p["key"]): pdata[p["key"]]["operational"].get(acc_key, 0) for p in period_list}
-		if all(not v for v in arow.values()):
-			continue
-		rows.append(mk(acc_name, value_map=arow, row_type="detail", level=2, is_cost=True, indent=1))
-	rows.append(divider())
-
-	gp = per_period(lambda d: d["revenue"] - d["cogs"] - sum(d["operational"].values()))
-	rows.append(mk("Валовая прибыль", value_map=gp, row_type="result"))
-	rows.append(mk("маржа",
-		value_map=per_period(lambda d: (d["revenue"] - d["cogs"] - sum(d["operational"].values())) / d["revenue"] * 100 if d["revenue"] else 0),
-		row_type="percent", level=1, is_percent=True))
-	rows.append(divider())
-
-	# ── Расходы с прибыли: Админ + Бошқа бевосита + Бошқа ────────────────────
+	# ── Расходы с прибыли: Операционные + Административные + Бошқа ──────────
 	def _opex(d):
-		return (sum(d["admin"].values()) + sum(d["other_indirect"].values())
+		return (sum(d["operational"].values()) + sum(d["admin"].values())
 				+ sum(d["other_uncategorized"].values()))
 
 	opex_total = per_period(_opex)
 	rows.append(mk("Расходы с прибыли", value_map=opex_total, row_type="root", is_cost=True))
 	for section_label, key in [
+		("Операционные расходы", "operational"),
 		("Административные расходы", "admin"),
-		("Бошқа бевосита харажатлар", "other_indirect"),
 		("Бошқа харажатлар", "other_uncategorized"),
 	]:
 		svals = {_fk(p["key"]): sum(pdata[p["key"]][key].values()) for p in period_list}
@@ -386,8 +347,7 @@ def build_rows(period_list, pdata, opex_accounts=None):
 	rows.append(divider())
 
 	def _net(d):
-		gross = d["revenue"] - d["cogs"] - sum(d["operational"].values())
-		return gross - _opex(d)
+		return d["revenue"] - d["cogs"] - _opex(d)
 
 	rows.append(mk("Чистая прибыль", value_map=per_period(_net), row_type="result"))
 	rows.append(mk("рентабельность",
@@ -442,11 +402,12 @@ def get_summary_html(company, filters, period_list, pdata):
 	cards_html = ""
 	for i, p in enumerate(period_list):
 		d = pdata[p["key"]]
-		gp = d["revenue"] - d["cogs"] - sum(d["operational"].values())
-		opex = sum(d["admin"].values()) + sum(d["other_indirect"].values()) + sum(d["other_uncategorized"].values())
-		np = gp - opex
+		marginal = d["revenue"] - d["cogs"]
+		opex = (sum(d["operational"].values()) + sum(d["admin"].values())
+				+ sum(d["other_uncategorized"].values()))
+		np = marginal - opex
 
-		gm_pct = (gp / d["revenue"] * 100) if d["revenue"] else 0
+		gm_pct = (marginal / d["revenue"] * 100) if d["revenue"] else 0
 		nm_pct = (np / d["revenue"] * 100) if d["revenue"] else 0
 		color = CARD_COLORS[i % len(CARD_COLORS)]
 
@@ -487,11 +448,11 @@ def get_summary_html(company, filters, period_list, pdata):
 
 			<div style="margin-bottom:10px;">
 			  <div style="display:flex;justify-content:space-between;align-items:center;">
-				<span style="font-size:10px;color:#777;">Yalpi foyda</span>
+				<span style="font-size:10px;color:#777;">Маржинал foyda</span>
 				<span style="font-size:11px;font-weight:700;color:#10b981;">{gm_pct:.1f}%</span>
 			  </div>
 			  {gm_bar}
-			  <div style="font-size:9px;color:#bbb;margin-top:2px;">{_fmt(gp)} {currency}</div>
+			  <div style="font-size:9px;color:#bbb;margin-top:2px;">{_fmt(marginal)} {currency}</div>
 			</div>
 
 			<div>
@@ -519,7 +480,7 @@ def get_summary_html(company, filters, period_list, pdata):
 		cogs_pct = d["cogs"] / rev * 100
 		op_pct = sum(d["operational"].values()) / rev * 100
 		adm_pct = sum(d["admin"].values()) / rev * 100
-		oth_pct = (sum(d["other_indirect"].values()) + sum(d["other_uncategorized"].values())) / rev * 100
+		oth_pct = sum(d["other_uncategorized"].values()) / rev * 100
 		profit_pct = max(100 - cogs_pct - op_pct - adm_pct - oth_pct, 0)
 		color = CARD_COLORS[i % len(CARD_COLORS)]
 
