@@ -36,10 +36,40 @@ class JaziraAppDailySalesImport(Document):
         )
     
     def on_trash(self):
-        """Cleanup before deletion."""
-        if self.status == "Processed":
-            frappe.throw(
-                _("Cannot delete processed import. Cancel it first.")
+        """Hujjat o'chirilganda u yaratgan Sales Invoice va Stock Entry'larni
+        ham bekor qiladi.
+
+        Avval faqat "Processed" statusni o'chirish bloklanardi. Lekin import
+        har bir sanani alohida commit qiladi — 11 kundan 5-chisida xato bo'lsa,
+        birinchi 4 kunning SI'si allaqachon submit bo'lgan holda status
+        "Failed" bo'lib qolardi va bunday hujjatni o'chirish mumkin edi.
+        Natijada tizimda egasiz (hech qaysi importga bog'lanmagan) submit
+        qilingan hujjatlar qolib ketardi. Endi status'idan qat'iy nazar,
+        bog'langan hujjatlar avval bekor qilinadi.
+        """
+        from jazira_app.jazira_app.services import invoice_service, stock_service
+
+        # Tartib muhim: avval SI (sotilgan mahsulotni omborga qaytaradi),
+        # keyin SE (ishlab chiqarishni orqaga qaytaradi) — cancel_import
+        # bilan bir xil tartib.
+        cancelled_si = []
+        if self.sales_invoice:
+            for si_name in [s.strip() for s in self.sales_invoice.split(",") if s.strip()]:
+                if invoice_service.cancel_invoice(si_name):
+                    cancelled_si.append(si_name)
+
+        cancelled_se = 0
+        if self.stock_entry:
+            se_names = [s.strip() for s in self.stock_entry.split(",") if s.strip()]
+            cancelled_se = stock_service.cancel_stock_entries(se_names)
+
+        if cancelled_si or cancelled_se:
+            frappe.msgprint(
+                _("Import o'chirildi. Bekor qilindi: {0} ta Sales Invoice, {1} ta Stock Entry.").format(
+                    len(cancelled_si), cancelled_se
+                ),
+                indicator="orange",
+                alert=True,
             )
 
 

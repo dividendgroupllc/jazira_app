@@ -117,3 +117,59 @@ def check_duplicate_import(excel_hash: str, current_doc_name: str) -> Dict:
         }
     )
     return {"is_duplicate": bool(existing), "existing_doc": existing}
+
+
+def check_duplicate_dates(company: str, dates, current_doc_name: str) -> Dict:
+    """Bu sanalar shu kompaniya uchun allaqachon import qilinganmi?
+
+    check_duplicate_import() faqat Excel faylning hash'ini solishtiradi —
+    fayl qayta eksport qilinsa yoki bitta katak o'zgartirilsa, hash boshqacha
+    bo'lib, ayni kunni ikkinchi marta import qilish mumkin edi (amalda bir kun
+    3 martagacha import qilingan holatlar bo'lgan).
+
+    Bu tekshiruv esa sana darajasida ishlaydi: boshqa importga tegishli va
+    hali SUBMIT holatida turgan Sales Invoice bor sanalarni bloklaydi.
+    BEKOR QILINGAN (cancelled) SI to'sqinlik qilmaydi — ya'ni xato importni
+    bekor qilib, o'sha kunni qayta yuklash bemalol mumkin.
+    """
+    dates = {str(d) for d in (dates or []) if d}
+    if not dates or not company:
+        return {"has_conflict": False, "conflicts": []}
+
+    other_imports = frappe.get_all(
+        "Jazira App Daily Sales Import",
+        filters={"company": company, "name": ["!=", current_doc_name]},
+        fields=["name", "sales_invoice"],
+    )
+
+    # Sales Invoice nomi -> uni yaratgan import hujjati
+    si_owner = {}
+    for imp in other_imports:
+        if not imp.sales_invoice:
+            continue
+        for si_name in [s.strip() for s in imp.sales_invoice.split(",") if s.strip()]:
+            si_owner.setdefault(si_name, imp.name)
+
+    if not si_owner:
+        return {"has_conflict": False, "conflicts": []}
+
+    submitted = frappe.get_all(
+        "Sales Invoice",
+        filters={"name": ["in", list(si_owner.keys())], "docstatus": 1},
+        fields=["name", "posting_date"],
+    )
+
+    conflicts = []
+    seen_dates = set()
+    for si in submitted:
+        posting_date = str(si.posting_date)
+        if posting_date in dates and posting_date not in seen_dates:
+            seen_dates.add(posting_date)
+            conflicts.append({
+                "date": posting_date,
+                "import_doc": si_owner[si.name],
+                "sales_invoice": si.name,
+            })
+
+    conflicts.sort(key=lambda c: c["date"])
+    return {"has_conflict": bool(conflicts), "conflicts": conflicts}

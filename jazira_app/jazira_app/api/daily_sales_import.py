@@ -10,7 +10,8 @@ from jazira_app.jazira_app.utils import (
     calculate_file_hash,
     validate_import_prerequisites,
     validate_items_exist,
-    check_duplicate_import
+    check_duplicate_import,
+    check_duplicate_dates
 )
 from jazira_app.jazira_app.services import (
     excel_service,
@@ -128,6 +129,19 @@ def validate_excel_items(doc_name: str) -> Dict:
                 "item_name": "",
                 "error": _("Bu Excel avval import qilingan: {0}").format(
                     duplicate["existing_doc"]
+                )
+            })
+
+        # Sana bo'yicha dublikat — importni ishga tushirmasdan oldin ogohlantirish
+        fallback_date = str(doc.posting_date)
+        excel_dates = {(i.get("date") or fallback_date) for i in validation["valid_items"]}
+        date_check = check_duplicate_dates(doc.company, excel_dates, doc_name)
+        for c in date_check["conflicts"]:
+            errors.insert(0, {
+                "row": 0,
+                "item_name": "",
+                "error": _("{0} sanasi allaqachon import qilingan ({1}). Avval o'sha importni bekor qiling.").format(
+                    c["date"], c["import_doc"]
                 )
             })
         
@@ -299,6 +313,21 @@ def _process_import_sync(doc_name: str) -> Dict:
             
         sorted_dates = sorted(items_by_date.keys())
         log(f"   📅 Jami {len(sorted_dates)} xil sana aniqlandi")
+
+        # Sana bo'yicha dublikat tekshiruvi. Yuqoridagi hash tekshiruvi faqat
+        # bir xil faylni ushlaydi — fayl qayta eksport qilinsa, ayni kunni
+        # ikkinchi marta yuklash mumkin edi. Bu yerda esa: shu kompaniya uchun
+        # o'sha sanada boshqa importning SUBMIT holatidagi SI'si bo'lsa,
+        # to'xtatamiz. Bekor qilingan SI to'sqinlik qilmaydi.
+        date_check = check_duplicate_dates(doc.company, sorted_dates, doc_name)
+        if date_check["has_conflict"]:
+            for c in date_check["conflicts"]:
+                log(f"   ❌ {c['date']} — allaqachon import qilingan ({c['import_doc']} → {c['sales_invoice']})")
+            raise Exception(
+                _("Quyidagi sanalar allaqachon import qilingan: {0}. Avval o'sha importni bekor qiling.").format(
+                    ", ".join(c["date"] for c in date_check["conflicts"])
+                )
+            )
 
         all_se_names = []
         all_si_names = []
