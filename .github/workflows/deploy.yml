@@ -26,6 +26,23 @@ jobs:
           script: |
             export BENCH_PATH="${{ secrets.BENCH_PATH }}"
             export SITE_NAME="${{ secrets.SITE_NAME }}"
+
+            # Productionda developer_mode yoqiq turadi — shu sababli Frappe
+            # standart Report/DocType JSON fayllarini diskka qayta yozib turadi
+            # (idx, letter_head, modified kabi maydonlar o'zgaradi). Bu esa
+            # deploy.sh ning "Uncommitted changes. Aborting." tekshiruvini
+            # ishga tushirib, deploy'ni to'xtatib qo'yardi.
+            #
+            # Shuning uchun pull'dan oldin bu o'zgarishlarni stash'ga olamiz:
+            # o'chirilmaydi, kerak bo'lsa `git stash list` / `git stash show -p`
+            # orqali qaytarib olish mumkin.
+            cd "$BENCH_PATH/apps/jazira_app" || exit 1
+            if [ -n "$(git status --porcelain)" ]; then
+              echo "Auto-generated o'zgarishlar topildi — stash'ga olinmoqda:"
+              git status --short
+              git stash push -u -m "auto-stash before deploy $(date +%F_%H%M%S)" || true
+            fi
+
             bash /home/frappe/deploy/deploy.sh
         env:
           BENCH_PATH: ${{ secrets.BENCH_PATH }}
