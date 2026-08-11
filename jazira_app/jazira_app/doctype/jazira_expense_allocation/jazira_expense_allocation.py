@@ -9,6 +9,10 @@ from frappe.utils import cint, flt, get_first_day, get_last_day, getdate
 
 ALLOCATION_REMARK_PREFIX = "Jazira Expense Allocation:"
 
+# Taqsimlanadigan xarajat guruhi — faqat ma'muriy (Адм) xarajatlar.
+# Operatsion (52001) xarajatlar har filialning o'zida qoladi va hovuzga kirmaydi.
+ADMIN_EXPENSE_GROUP = "52002"
+
 DEFAULT_COMPANIES = (
     "Jazira Sklad",
     "Jazira Smart",
@@ -33,7 +37,17 @@ class JaziraExpenseAllocation(Document):
         self.set_status()
 
     def before_submit(self):
-        self.calculate(save=False)
+        # Frappe submit paytida AVVAL docstatus'ni 1 qilib qo'yadi, keyin
+        # before_submit'ni chaqiradi (frappe/model/document.py:_submit).
+        # Shuning uchun calculate() ichidagi "faqat Draft" himoyasi shu
+        # yerda ishlab ketib, submit'ni butunlay bloklab qo'yardi.
+        # Bayroq flags orqali beriladi — uni brauzerdan o'rnatib bo'lmaydi.
+        self.flags.allow_calculate_on_submit = True
+        try:
+            self.calculate(save=False)
+        finally:
+            self.flags.allow_calculate_on_submit = False
+
         self.validate_unique_submitted_period()
         self.validate_submit_ready()
 
@@ -41,15 +55,19 @@ class JaziraExpenseAllocation(Document):
         created = []
         created.extend(self.create_expense_reversal_journal_entries())
         created.extend(self.create_allocation_journal_entries())
+        payments = self.create_settlement_payment_entries()
         self.db_set("status", "Submitted")
 
         if created:
-            frappe.msgprint(
-                _("Xarajat taqsimoti uchun {0} ta Journal Entry yaratildi").format(len(created)),
-                indicator="green",
-            )
+            msg = _("Xarajat taqsimoti uchun {0} ta Journal Entry yaratildi").format(len(created))
+            if payments:
+                msg += _(" va {0} ta to'lov (Payment Entry)").format(len(payments))
+            frappe.msgprint(msg, indicator="green")
 
     def on_cancel(self):
+        # Tartib muhim: to'lovlar Journal Entry'ga ilingan, shuning uchun
+        # avval to'lovlar bekor qilinadi, keyin yozuvlar.
+        self.cancel_settlement_payment_entries()
         self.cancel_allocation_journal_entries()
         self.cancel_expense_reversal_journal_entries()
         self.db_set("status", "Cancelled")
@@ -76,9 +94,7 @@ class JaziraExpenseAllocation(Document):
         self.posting_date = self.to_date
 
     def set_currency(self):
-        company = None
-        if self.expense_company_scope == "Source Company":
-            company = self.expense_source_company
+        company = self.expense_source_company
 
         if not company:
             companies = self.get_allocation_companies()
@@ -88,19 +104,29 @@ class JaziraExpenseAllocation(Document):
             self.currency = frappe.db.get_value("Company", company, "default_currency")
 
     def validate_expense_scope(self):
-        if self.expense_company_scope != "Source Company":
-            self.expense_source_company = None
-            return
-
         if not self.expense_source_company:
-            frappe.throw(_("Source Company rejimida xarajat manba kompaniyasi majburiy"))
+            frappe.throw(_("Xarajat manba kompaniyasi majburiy"))
 
     def set_source_offset_account(self):
-        if self.expense_company_scope != "Source Company":
-            self.source_offset_account = None
+        if not cint(self.create_source_reversal):
             return
 
-        if cint(self.create_source_reversal) and not self.source_offset_account:
+        # Filiallararo qarz party bilan qayd etilgani uchun bu yerda
+        # Receivable turidagi hisob kerak. Boshqa tur saqlanib qolgan bo'lsa
+        # (eski hujjatlar), avtomatik to'g'risiga almashtiramiz.
+        if self.source_offset_account and get_account_type(self.source_offset_account) != RECEIVABLE_TYPE:
+            replacement = self.get_default_source_offset_account(self.expense_source_company)
+            if replacement:
+                frappe.msgprint(
+                    _("Manba hisobi '{0}' → '{1}' bilan almashtirildi (debitorlik hisobi kerak).").format(
+                        self.source_offset_account, replacement
+                    ),
+                    indicator="orange",
+                    alert=True,
+                )
+                self.source_offset_account = replacement
+
+        if not self.source_offset_account:
             self.source_offset_account = self.get_default_source_offset_account(
                 self.expense_source_company
             )
@@ -130,7 +156,7 @@ class JaziraExpenseAllocation(Document):
 
     @frappe.whitelist()
     def calculate(self, save=True):
-        if self.docstatus != 0:
+        if self.docstatus != 0 and not self.flags.get("allow_calculate_on_submit"):
             frappe.throw(_("Faqat Draft holatdagi hujjatni qayta hisoblash mumkin"))
 
         self.validate_period()
@@ -269,6 +295,10 @@ class JaziraExpenseAllocation(Document):
 
             if not row.expense_account:
                 row.expense_account = self.get_default_expense_account(row.company)
+            # Filial tomonidagi qarz party bilan qayd etilgani uchun Payable
+            # turidagi hisob kerak — boshqasi bo'lsa to'g'risiga almashtiramiz.
+            if row.offset_account and get_account_type(row.offset_account) != PAYABLE_TYPE:
+                row.offset_account = None
             if not row.offset_account:
                 row.offset_account = self.get_default_offset_account(row.company)
             if not row.cost_center:
@@ -374,14 +404,45 @@ class JaziraExpenseAllocation(Document):
 
         return flt(result[0].profit if result else 0, 2)
 
+    def get_admin_expense_groups(self, companies):
+        """Berilgan kompaniyalarning "52002 - Адм" guruh hisoblarini qaytaradi.
+
+        Taqsimlanadigan hovuzga FAQAT ma'muriy (Адм) xarajatlar kiradi —
+        operatsion (52001) xarajatlar har filialning o'zida qoladi.
+        """
+        groups = []
+        for company in companies:
+            group = frappe.db.get_value(
+                "Account",
+                {
+                    "company": company,
+                    "account_number": ADMIN_EXPENSE_GROUP,
+                    "root_type": "Expense",
+                    "is_group": 1,
+                },
+                "name",
+            )
+            if group:
+                groups.append(group)
+        return groups
+
     def get_period_journal_expenses(self):
         companies = self.get_expense_companies()
         if not companies:
             return []
 
+        admin_groups = self.get_admin_expense_groups(companies)
+        if not admin_groups:
+            frappe.throw(
+                _("'{0}' kompaniyasida '{1}' (Адм) xarajat guruhi topilmadi").format(
+                    companies[0], ADMIN_EXPENSE_GROUP
+                )
+            )
+
         allocation_filter = self.get_journal_entry_exclusion_sql("je")
         params = self.get_query_params(self.expense_source_company)
         params["expense_companies"] = tuple(companies)
+        params["admin_groups"] = tuple(admin_groups)
 
         return frappe.db.sql(
             f"""
@@ -404,6 +465,7 @@ class JaziraExpenseAllocation(Document):
                 AND je.docstatus = 1
                 AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
                 AND acc.root_type = 'Expense'
+                AND acc.parent_account IN %(admin_groups)s
                 AND ABS(COALESCE(jea.debit, 0) - COALESCE(jea.credit, 0)) > 0.005
                 AND {allocation_filter}
             ORDER BY je.posting_date, je.name, jea.idx
@@ -413,14 +475,6 @@ class JaziraExpenseAllocation(Document):
         )
 
     def get_expense_companies(self):
-        if self.expense_company_scope == "Allocation Companies":
-            companies = []
-            for company_config in self.get_company_configs():
-                company = company_config.get("company")
-                if company and company not in companies:
-                    companies.append(company)
-            return companies
-
         return [self.expense_source_company] if self.expense_source_company else []
 
     def get_query_params(self, company):
@@ -497,32 +551,40 @@ class JaziraExpenseAllocation(Document):
             frappe.throw(_("Ajratilgan summa jami xarajatga teng emas"))
 
         if cint(self.create_source_reversal):
-            if self.expense_company_scope == "Source Company" and not self.source_offset_account:
+            if not self.source_offset_account:
                 frappe.throw(_("Manba clearing account to'ldirilmagan"))
 
-            if self.expense_company_scope == "Source Company":
-                self.validate_account(
-                    self.source_offset_account,
-                    self.expense_source_company,
-                    _("Manba clearing account"),
+            # Filiallararo qarz party bilan yoziladi — shuning uchun bu yerda
+            # aynan Receivable turidagi hisob bo'lishi shart.
+            if get_account_type(self.source_offset_account) != RECEIVABLE_TYPE:
+                frappe.throw(
+                    _(
+                        "'{0}' — debitorlik (Receivable) hisobi emas. Filiallararo qarz "
+                        "party bilan qayd etilishi uchun manba hisobi Receivable turida "
+                        "bo'lishi kerak (masalan '1310 - Debtors')."
+                    ).format(self.source_offset_account)
                 )
-            else:
-                company_row_by_company = self.get_company_row_by_company()
-                for company, amount in self.get_expense_company_totals().items():
-                    if abs(flt(amount)) <= 0.005:
-                        continue
-                    company_row = company_row_by_company.get(company)
-                    if not company_row or not company_row.offset_account:
-                        frappe.throw(
-                            _("{0} kompaniyasi uchun clearing/qarshi account to'ldirilmagan").format(
-                                company
-                            )
-                        )
-                    self.validate_account(
-                        company_row.offset_account,
-                        company,
-                        _("Clearing account ({0})").format(company),
+
+            # Har bir qarzdor filial uchun ichki mijoz bo'lishi shart
+            missing_customers = [
+                row.company
+                for row in self.companies
+                if row.company != self.expense_source_company
+                and flt(row.allocated_expense_amount) > 0
+                and not get_internal_customer(row.company)
+            ]
+            if missing_customers:
+                frappe.throw(
+                    _("Quyidagi kompaniyalar uchun ichki mijoz (internal customer) topilmadi: {0}").format(
+                        ", ".join(missing_customers)
                     )
+                )
+
+            self.validate_account(
+                self.source_offset_account,
+                self.expense_source_company,
+                _("Manba clearing account"),
+            )
 
         missing = []
         for row in self.companies:
@@ -538,6 +600,23 @@ class JaziraExpenseAllocation(Document):
                 _("Xarajat account ({0})").format(row.company),
                 root_type="Expense",
             )
+            # Manba kompaniyaning o'z ulushi joyida qoladi — unga JE yozilmaydi,
+            # shuning uchun qarshi hisob talablari ham qo'llanmaydi.
+            if row.company != self.expense_source_company:
+                if get_account_type(row.offset_account) != PAYABLE_TYPE:
+                    frappe.throw(
+                        _(
+                            "'{0}' — kreditorlik (Payable) hisobi emas. '{1}' filiali Skladga "
+                            "qarzdorligi party bilan qayd etilishi uchun Payable turidagi hisob "
+                            "kerak (masalan '2110 - Creditors')."
+                        ).format(row.offset_account, row.company)
+                    )
+                if not get_internal_supplier(self.expense_source_company):
+                    frappe.throw(
+                        _("'{0}' uchun ichki taminotchi (internal supplier) topilmadi").format(
+                            self.expense_source_company
+                        )
+                    )
             self.validate_account(
                 row.offset_account,
                 row.company,
@@ -556,9 +635,6 @@ class JaziraExpenseAllocation(Document):
                     ", ".join(missing)
                 )
             )
-
-    def get_company_row_by_company(self):
-        return {row.company: row for row in self.companies if row.company}
 
     def get_expense_company_totals(self):
         totals = {}
@@ -718,54 +794,20 @@ class JaziraExpenseAllocation(Document):
             return []
 
         created = []
-        if self.expense_company_scope == "Source Company":
-            if self.source_reversal_journal_entry and frappe.db.exists(
-                "Journal Entry", self.source_reversal_journal_entry
-            ):
-                return [self.source_reversal_journal_entry]
+        if self.source_reversal_journal_entry and frappe.db.exists(
+            "Journal Entry", self.source_reversal_journal_entry
+        ):
+            return [self.source_reversal_journal_entry]
 
-            journal_entry = self.create_company_reversal_journal_entry(
-                self.expense_source_company,
-                self.source_offset_account,
-                grouped_by_company.get(self.expense_source_company, {}),
-                "source reversal",
-            )
-            if journal_entry:
-                self.db_set("source_reversal_journal_entry", journal_entry)
-                self.source_reversal_journal_entry = journal_entry
-                created.append(journal_entry)
-
-            return created
-
-        company_row_by_company = self.get_company_row_by_company()
-        for company, grouped_expenses in grouped_by_company.items():
-            company_row = company_row_by_company.get(company)
-            if not company_row:
-                continue
-
-            if company_row.reversal_journal_entry and frappe.db.exists(
-                "Journal Entry", company_row.reversal_journal_entry
-            ):
-                created.append(company_row.reversal_journal_entry)
-                continue
-
-            journal_entry = self.create_company_reversal_journal_entry(
-                company,
-                company_row.offset_account,
-                grouped_expenses,
-                f"{company} reversal",
-            )
-            if not journal_entry:
-                continue
-
-            frappe.db.set_value(
-                company_row.doctype,
-                company_row.name,
-                "reversal_journal_entry",
-                journal_entry,
-                update_modified=False,
-            )
-            company_row.reversal_journal_entry = journal_entry
+        journal_entry = self.create_company_reversal_journal_entry(
+            self.expense_source_company,
+            self.source_offset_account,
+            grouped_by_company.get(self.expense_source_company, {}),
+            "source reversal",
+        )
+        if journal_entry:
+            self.db_set("source_reversal_journal_entry", journal_entry)
+            self.source_reversal_journal_entry = journal_entry
             created.append(journal_entry)
 
         return created
@@ -789,8 +831,36 @@ class JaziraExpenseAllocation(Document):
         return grouped_by_company
 
     def create_company_reversal_journal_entry(self, company, offset_account, grouped_expenses, label):
-        total_amount = flt(sum(grouped_expenses.values()), 2)
-        if abs(total_amount) <= 0.005:
+        """Manba kompaniyada filiallarga qayta yozilgan ulushni chiqarish.
+
+        MUHIM: manba kompaniyaning O'Z ulushi chiqarilmaydi — u o'z joyida,
+        o'z xarajat hisoblarida qoladi. Faqat boshqa kompaniyalarga tegishli
+        qism kamaytiriladi, va uning qarshi tomoni har bir filial uchun
+        ALOHIDA debitorlik qatori bo'lib, party (ichki mijoz) bilan yoziladi.
+        Shu tufayli qarzni Akt Sverkada ko'rish va Payment Entry bilan yopish
+        mumkin bo'ladi.
+        """
+        total_expense = flt(sum(grouped_expenses.values()), 2)
+        if abs(total_expense) <= 0.005:
+            return None
+
+        # Har bir filial (manbadan tashqari) uchun qarz qatorlari
+        debtor_rows = []
+        for row in self.companies:
+            if row.company == company:
+                continue
+            amount = flt(row.allocated_expense_amount, 2)
+            if amount <= 0:
+                continue
+            customer = get_internal_customer(row.company)
+            if not customer:
+                frappe.throw(
+                    _("'{0}' uchun ichki mijoz topilmadi").format(row.company)
+                )
+            debtor_rows.append((customer, row.company, amount))
+
+        recharged_total = flt(sum(a for _c, _co, a in debtor_rows), 2)
+        if recharged_total <= 0.005:
             return None
 
         je = frappe.new_doc("Journal Entry")
@@ -805,39 +875,40 @@ class JaziraExpenseAllocation(Document):
         if journal_entry_has_allocation_field():
             je.custom_jazira_expense_allocation = self.name
 
-        je.append(
-            "accounts",
-            {
-                "account": offset_account,
-                "debit_in_account_currency": total_amount if total_amount > 0 else 0,
-                "credit_in_account_currency": abs(total_amount) if total_amount < 0 else 0,
-                "user_remark": je.user_remark,
-            },
-        )
+        # Дт — har bir filial alohida, party bilan
+        for customer, branch, amount in debtor_rows:
+            je.append(
+                "accounts",
+                {
+                    "account": offset_account,
+                    "party_type": "Customer",
+                    "party": customer,
+                    "debit_in_account_currency": amount,
+                    "credit_in_account_currency": 0,
+                    "user_remark": f"{je.user_remark} | {branch}",
+                },
+            )
 
-        for (account, cost_center), net_amount in grouped_expenses.items():
-            row = {
-                "account": account,
-                "user_remark": je.user_remark,
-            }
+        # Кт — asl xarajat hisoblari, qayta yozilgan ulush nisbatida
+        ratio = recharged_total / total_expense if total_expense else 0
+        credited = 0.0
+        items = [(k, v) for k, v in grouped_expenses.items() if abs(flt(v, 2)) > 0.005]
+        for idx, ((account, cost_center), net_amount) in enumerate(items):
+            share = flt(flt(net_amount) * ratio, 2)
+            # Oxirgi qatorga yaxlitlash qoldig'i beriladi — jami aniq mos kelsin
+            if idx == len(items) - 1:
+                share = flt(recharged_total - credited, 2)
+            credited = flt(credited + share, 2)
+            if abs(share) <= 0.005:
+                continue
+
+            row = {"account": account, "user_remark": je.user_remark}
             if cost_center:
                 row["cost_center"] = cost_center
-
-            if net_amount > 0:
-                row.update(
-                    {
-                        "debit_in_account_currency": 0,
-                        "credit_in_account_currency": net_amount,
-                    }
-                )
+            if share > 0:
+                row.update({"debit_in_account_currency": 0, "credit_in_account_currency": share})
             else:
-                row.update(
-                    {
-                        "debit_in_account_currency": abs(net_amount),
-                        "credit_in_account_currency": 0,
-                    }
-                )
-
+                row.update({"debit_in_account_currency": abs(share), "credit_in_account_currency": 0})
             je.append("accounts", row)
 
         je.insert(ignore_permissions=True)
@@ -846,15 +917,27 @@ class JaziraExpenseAllocation(Document):
 
     def create_allocation_journal_entries(self):
         created = []
+        source_supplier = get_internal_supplier(self.expense_source_company)
+
         for row in self.companies:
             amount = flt(row.allocated_expense_amount, 2)
             if amount <= 0:
+                continue
+
+            # Manba kompaniyaning o'z ulushi allaqachon o'z xarajat
+            # hisoblarida turibdi — unga qayta yozuv kerak emas.
+            if row.company == self.expense_source_company:
                 continue
 
             if row.allocation_journal_entry and frappe.db.exists(
                 "Journal Entry", row.allocation_journal_entry
             ):
                 continue
+
+            if not source_supplier:
+                frappe.throw(
+                    _("'{0}' uchun ichki taminotchi topilmadi").format(self.expense_source_company)
+                )
 
             je = frappe.new_doc("Journal Entry")
             je.voucher_type = "Journal Entry"
@@ -874,8 +957,11 @@ class JaziraExpenseAllocation(Document):
                 "credit_in_account_currency": 0,
                 "user_remark": je.user_remark,
             }
+            # Кт — Skladga qarz, party (ichki taminotchi) bilan qayd etiladi
             credit_row = {
                 "account": row.offset_account,
+                "party_type": "Supplier",
+                "party": source_supplier,
                 "debit_in_account_currency": 0,
                 "credit_in_account_currency": amount,
                 "user_remark": je.user_remark,
@@ -901,6 +987,145 @@ class JaziraExpenseAllocation(Document):
             created.append(je.name)
 
         return created
+
+    # ------------------------------------------------------------------
+    # To'lovlar (settlement)
+    # ------------------------------------------------------------------
+
+    def get_cash_account(self, company):
+        account = get_company_default(company, "default_cash_account")
+        if account:
+            return account
+        return frappe.db.get_value(
+            "Account",
+            {"company": company, "account_type": "Cash", "is_group": 0},
+            "name",
+            order_by="lft asc",
+        )
+
+    def _submit_payment_entry(self, company, payment_type, party_type, party,
+                              paid_from, paid_to, amount, reference_doctype,
+                              reference_name, label):
+        """Bitta Payment Entry yaratib, uni tegishli Journal Entry'ga ilaydi."""
+        pe = frappe.new_doc("Payment Entry")
+        pe.payment_type = payment_type
+        pe.company = company
+        pe.posting_date = self.posting_date or self.to_date
+        pe.party_type = party_type
+        pe.party = party
+        pe.paid_from = paid_from
+        pe.paid_to = paid_to
+        pe.paid_amount = amount
+        pe.received_amount = amount
+        pe.source_exchange_rate = 1
+        pe.target_exchange_rate = 1
+        pe.reference_no = self.name
+        pe.reference_date = self.posting_date or self.to_date
+        pe.remarks = (
+            f"{ALLOCATION_REMARK_PREFIX} {self.name} | "
+            f"{self.from_date} - {self.to_date} | {label}"
+        )
+
+        # Hujjatning "Connections" bo'limida ko'rinishi uchun
+        if payment_entry_has_allocation_field():
+            pe.custom_jazira_expense_allocation = self.name
+
+        pe.append(
+            "references",
+            {
+                "reference_doctype": reference_doctype,
+                "reference_name": reference_name,
+                "allocated_amount": amount,
+            },
+        )
+
+        pe.flags.ignore_permissions = True
+        pe.insert()
+        pe.submit()
+        return pe.name
+
+    def create_settlement_payment_entries(self):
+        """Filial Skladga to'lagan deb ikki tomonlama to'lov yozuvi yaratadi.
+
+        Filialda:  Дт 2110 Creditors [Sklad]  / Кт Касса      -> qarz yopiladi
+        Skladda:   Дт Касса / Кт 1310 Debtors [filial]        -> pul tushadi
+
+        Har ikkalasi tegishli Journal Entry'ga ilinadi (Payment Entry
+        Reference), shuning uchun qarz "yopilgan" deb hisoblanadi.
+        """
+        if not cint(self.get("create_settlement_payments")):
+            return []
+
+        source_company = self.expense_source_company
+        source_cash = self.get_cash_account(source_company)
+        if not source_cash:
+            frappe.throw(_("'{0}' uchun kassa hisobi topilmadi").format(source_company))
+
+        source_supplier = get_internal_supplier(source_company)
+        created = []
+
+        for row in self.companies:
+            amount = flt(row.allocated_expense_amount, 2)
+            if amount <= 0 or row.company == source_company:
+                continue
+            if not row.allocation_journal_entry:
+                continue
+            if row.branch_payment_entry and frappe.db.exists("Payment Entry", row.branch_payment_entry):
+                continue
+
+            branch_cash = self.get_cash_account(row.company)
+            if not branch_cash:
+                frappe.throw(_("'{0}' uchun kassa hisobi topilmadi").format(row.company))
+
+            # 1) Filial to'laydi
+            branch_pe = self._submit_payment_entry(
+                company=row.company,
+                payment_type="Pay",
+                party_type="Supplier",
+                party=source_supplier,
+                paid_from=branch_cash,
+                paid_to=row.offset_account,
+                amount=amount,
+                reference_doctype="Journal Entry",
+                reference_name=row.allocation_journal_entry,
+                label=f"{row.company} to'lovi",
+            )
+
+            # 2) Sklad qabul qiladi
+            customer = get_internal_customer(row.company)
+            source_pe = self._submit_payment_entry(
+                company=source_company,
+                payment_type="Receive",
+                party_type="Customer",
+                party=customer,
+                paid_from=self.source_offset_account,
+                paid_to=source_cash,
+                amount=amount,
+                reference_doctype="Journal Entry",
+                reference_name=self.source_reversal_journal_entry,
+                label=f"{row.company} dan qabul",
+            )
+
+            frappe.db.set_value(row.doctype, row.name, {
+                "branch_payment_entry": branch_pe,
+                "source_payment_entry": source_pe,
+            }, update_modified=False)
+            row.branch_payment_entry = branch_pe
+            row.source_payment_entry = source_pe
+            created.extend([branch_pe, source_pe])
+
+        return created
+
+    def cancel_settlement_payment_entries(self):
+        for row in self.companies:
+            for fieldname in ("branch_payment_entry", "source_payment_entry"):
+                name = row.get(fieldname)
+                if not name or not frappe.db.exists("Payment Entry", name):
+                    continue
+                pe = frappe.get_doc("Payment Entry", name)
+                if pe.docstatus == 1:
+                    pe.flags.ignore_permissions = True
+                    pe.cancel()
 
     def cancel_allocation_journal_entries(self):
         for row in self.companies:
@@ -932,12 +1157,50 @@ class JaziraExpenseAllocation(Document):
                 je.cancel()
 
     def get_default_expense_account(self, company):
+        """Filialga tushadigan ma'muriy ulush qaysi hisobga yoziladi.
+
+        Bu — MA'MURIY xarajat, shuning uchun u "52002 Адм" guruhi ostida
+        bo'lishi kerak. Kompaniyaning default_expense_account'i odatda
+        "5111 Cost of Goods Sold" bo'ladi — unga yozilsa ma'muriy xarajat
+        tannarxga tushib, yalpi marjani buzardi.
+        """
         if not company:
             return None
 
-        account = get_company_default(company, "default_expense_account")
-        if account:
-            return account
+        admin_group = frappe.db.get_value(
+            "Account",
+            {
+                "company": company,
+                "account_number": ADMIN_EXPENSE_GROUP,
+                "root_type": "Expense",
+                "is_group": 1,
+            },
+            "name",
+        )
+        if admin_group:
+            # Maxsus "ulush" hisobi bo'lsa — o'sha, aks holda guruhning
+            # birinchi hisobi.
+            account = frappe.db.get_value(
+                "Account",
+                {
+                    "company": company,
+                    "parent_account": admin_group,
+                    "is_group": 0,
+                    "account_name": ["like", "%улуш%"],
+                },
+                "name",
+            )
+            if account:
+                return account
+
+            account = frappe.db.get_value(
+                "Account",
+                {"company": company, "parent_account": admin_group, "is_group": 0},
+                "name",
+                order_by="lft asc",
+            )
+            if account:
+                return account
 
         return frappe.db.get_value(
             "Account",
@@ -947,66 +1210,32 @@ class JaziraExpenseAllocation(Document):
         )
 
     def get_default_offset_account(self, company):
+        """Filialning qarshi (offset) hisobi — "biz bosh kompaniyaga qarzdormiz".
+
+        Party (ichki taminotchi = Sklad) bilan birga ishlatiladi, shuning uchun
+        Payable turidagi hisob aynan kerak.
+        """
         if not company:
             return None
 
         account = get_company_default(company, "default_payable_account")
-        if account:
-            return account
-
-        account = frappe.db.get_value(
-            "Account",
-            {
-                "company": company,
-                "root_type": "Liability",
-                "account_type": ["in", ["Payable", "Current Liability"]],
-                "is_group": 0,
-            },
-            "name",
-            order_by="lft asc",
-        )
-        if account:
+        if account and get_account_type(account) == PAYABLE_TYPE:
             return account
 
         return frappe.db.get_value(
             "Account",
-            {"company": company, "root_type": "Liability", "is_group": 0},
+            {
+                "company": company,
+                "root_type": "Liability",
+                "is_group": 0,
+                "account_type": PAYABLE_TYPE,
+            },
             "name",
             order_by="lft asc",
         )
 
     def get_default_source_offset_account(self, company):
-        if not company:
-            return None
-
-        account = get_company_default(company, "default_receivable_account")
-        if account:
-            return account
-
-        account = get_company_default(company, "default_payable_account")
-        if account:
-            return account
-
-        account = frappe.db.get_value(
-            "Account",
-            {
-                "company": company,
-                "root_type": "Asset",
-                "account_type": ["in", ["Receivable", "Current Asset"]],
-                "is_group": 0,
-            },
-            "name",
-            order_by="lft asc",
-        )
-        if account:
-            return account
-
-        return frappe.db.get_value(
-            "Account",
-            {"company": company, "root_type": "Asset", "is_group": 0},
-            "name",
-            order_by="lft asc",
-        )
+        return get_default_clearing_account(company)
 
     def get_default_cost_center(self, company):
         if not company:
@@ -1034,8 +1263,70 @@ def get_company_default(company, fieldname):
     return frappe.db.get_value("Company", company, fieldname)
 
 
+# Filiallararo qarz PARTY (mijoz/taminotchi) bilan qayd etiladi — shundagina
+# uni Akt Sverkada ko'rish va Payment Entry bilan yopish mumkin. Shuning uchun
+# manba tomonida Receivable, filial tomonida Payable turidagi hisob KERAK.
+RECEIVABLE_TYPE = "Receivable"
+PAYABLE_TYPE = "Payable"
+
+
+def get_account_type(account):
+    return frappe.db.get_value("Account", account, "account_type") if account else None
+
+
+def get_internal_customer(company):
+    """Shu kompaniyani ifodalovchi ichki mijoz — boshqa kompaniya kitobida
+    "bu filial bizga qarzdor" deb yozish uchun kerak."""
+    if not company:
+        return None
+    return frappe.db.get_value(
+        "Customer", {"represents_company": company, "is_internal_customer": 1}, "name"
+    )
+
+
+def get_internal_supplier(company):
+    """Shu kompaniyani ifodalovchi ichki taminotchi — filial kitobida
+    "biz bosh kompaniyaga qarzdormiz" deb yozish uchun kerak."""
+    if not company:
+        return None
+    return frappe.db.get_value(
+        "Supplier", {"represents_company": company, "is_internal_supplier": 1}, "name"
+    )
+
+
+@frappe.whitelist()
+def get_default_clearing_account(company):
+    """Manba kompaniyaning debitorlik hisobi — "filiallar bizga qarzdor".
+
+    Party bilan birga ishlatiladi (party = filialning ichki mijozi), shuning
+    uchun Receivable turidagi hisob aynan kerak.
+
+    Foydalanuvchi kompaniyani tanlaganda brauzerdan ham chaqiriladi.
+    """
+    if not company:
+        return None
+
+    account = get_company_default(company, "default_receivable_account")
+    if account and get_account_type(account) == RECEIVABLE_TYPE:
+        return account
+
+    return frappe.db.get_value(
+        "Account",
+        {"company": company, "root_type": "Asset", "account_type": RECEIVABLE_TYPE, "is_group": 0},
+        "name",
+        order_by="lft asc",
+    )
+
+
 def journal_entry_has_allocation_field():
     try:
         return frappe.db.has_column("Journal Entry", "custom_jazira_expense_allocation")
+    except Exception:
+        return False
+
+
+def payment_entry_has_allocation_field():
+    try:
+        return frappe.db.has_column("Payment Entry", "custom_jazira_expense_allocation")
     except Exception:
         return False

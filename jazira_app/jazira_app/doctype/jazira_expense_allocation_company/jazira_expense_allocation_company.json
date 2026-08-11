@@ -15,7 +15,9 @@
   "offset_account",
   "cost_center",
   "reversal_journal_entry",
-  "allocation_journal_entry"
+  "allocation_journal_entry",
+  "branch_payment_entry",
+  "source_payment_entry"
  ],
  "fields": [
   {
@@ -102,6 +104,22 @@
    "no_copy": 1,
    "options": "Journal Entry",
    "read_only": 1
+  },
+  {
+   "fieldname": "branch_payment_entry",
+   "fieldtype": "Link",
+   "label": "Filial to'lovi",
+   "options": "Payment Entry",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "source_payment_entry",
+   "fieldtype": "Link",
+   "label": "Sklad qabul to'lovi",
+   "options": "Payment Entry",
+   "read_only": 1,
+   "no_copy": 1
   }
  ],
  "index_web_pages_for_search": 0,

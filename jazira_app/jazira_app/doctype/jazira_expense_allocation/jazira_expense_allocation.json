@@ -11,10 +11,10 @@
   "to_date",
   "posting_date",
   "column_break_main",
-  "expense_company_scope",
   "expense_source_company",
   "create_source_reversal",
   "source_offset_account",
+  "create_settlement_payments",
   "currency",
   "status",
   "source_reversal_journal_entry",
@@ -76,23 +76,14 @@
    "fieldtype": "Column Break"
   },
   {
-   "default": "Allocation Companies",
-   "fieldname": "expense_company_scope",
-   "fieldtype": "Select",
-   "label": "Xarajat kompaniya doirasi",
-   "options": "Allocation Companies\nSource Company",
-   "reqd": 1
-  },
-  {
-   "depends_on": "eval:doc.expense_company_scope == 'Source Company'",
+   "description": "Ма'мурий (Адм) харажатлари шу компаниядан йиғилади ва филиалларга тақсимланади",
    "fieldname": "expense_source_company",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Xarajat manba kompaniyasi",
-   "mandatory_depends_on": "eval:doc.expense_company_scope == 'Source Company'",
    "options": "Company",
-   "reqd": 0
+   "reqd": 1
   },
   {
    "default": "1",
@@ -101,12 +92,19 @@
    "label": "Yig'ilgan xarajatlarni yopish"
   },
   {
-   "depends_on": "eval:doc.create_source_reversal && doc.expense_company_scope == 'Source Company'",
+   "depends_on": "eval:doc.create_source_reversal",
    "fieldname": "source_offset_account",
    "fieldtype": "Link",
    "label": "Manba clearing account",
-   "mandatory_depends_on": "eval:doc.create_source_reversal && doc.expense_company_scope == 'Source Company'",
+   "mandatory_depends_on": "eval:doc.create_source_reversal",
    "options": "Account"
+  },
+  {
+   "default": "1",
+   "description": "Submit қилинганда филиаллар Складга тўлаган деб Payment Entry ҳам яратилади ва қарзга уланади. Пул ҳақиқатан кўчмаган бўлса — белгини олиб ташланг.",
+   "fieldname": "create_settlement_payments",
+   "fieldtype": "Check",
+   "label": "To'lovni ham yaratish"
   },
   {
    "fieldname": "currency",
@@ -244,6 +242,10 @@
  "links": [
   {
    "link_doctype": "Journal Entry",
+   "link_fieldname": "custom_jazira_expense_allocation"
+  },
+  {
+   "link_doctype": "Payment Entry",
    "link_fieldname": "custom_jazira_expense_allocation"
   }
  ],

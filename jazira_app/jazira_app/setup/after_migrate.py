@@ -24,6 +24,9 @@ def run():
 		ensure_intercompany_customers,
 		ensure_customer_filial_field,
 	)
+	from jazira_app.jazira_app.setup.expense_allocation_setup import (
+		run as setup_expense_allocation,
+	)
 
 	tasks = [
 		create_sales_order_print_format,
@@ -32,6 +35,7 @@ def run():
 		create_dividend_party_types,
 		ensure_intercompany_customers,
 		ensure_customer_filial_field,
+		setup_expense_allocation,
 	]
 	for fn in tasks:
 		try:

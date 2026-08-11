@@ -11,7 +11,6 @@ function get_calculation_key(frm) {
     return [
         frm.doc.from_date,
         frm.doc.to_date,
-        frm.doc.expense_company_scope,
         frm.doc.expense_source_company || '',
         frm.doc.create_source_reversal ? 1 : 0,
         frm.doc.profit_source,
@@ -35,10 +34,9 @@ function is_full_month_period(frm) {
 }
 
 function can_calculate(frm, show_message) {
-    const source_company_required = frm.doc.expense_company_scope === 'Source Company';
     const missing = !frm.doc.from_date
         || !frm.doc.to_date
-        || (source_company_required && !frm.doc.expense_source_company);
+        || !frm.doc.expense_source_company;
 
     if (!missing) {
         return true;
@@ -48,9 +46,7 @@ function can_calculate(frm, show_message) {
         frappe.msgprint({
             title: __('Ma\'lumot yetarli emas'),
             indicator: 'orange',
-            message: source_company_required
-                ? __('Period boshi, period oxiri va xarajat manba kompaniyasini kiriting.')
-                : __('Period boshi va period oxirini kiriting.')
+            message: __('Period boshi, period oxiri va xarajat manba kompaniyasini kiriting.')
         });
     }
 
@@ -159,12 +155,12 @@ frappe.ui.form.on('Jazira Expense Allocation', {
 
     onload(frm) {
         frm.trigger('set_default_companies');
-        frm.trigger('clear_source_company_if_not_needed');
+        frm.trigger('fill_default_clearing_account');
     },
 
     refresh(frm) {
         frm.trigger('set_default_companies');
-        frm.trigger('clear_source_company_if_not_needed');
+        frm.trigger('fill_default_clearing_account');
         frm.trigger('lock_companies_grid');
 
         if (frm.doc.docstatus === 0) {
@@ -189,17 +185,30 @@ frappe.ui.form.on('Jazira Expense Allocation', {
 
     expense_source_company(frm) {
         frm.set_value('source_offset_account', '');
+        frm.trigger('fill_default_clearing_account');
         frm.trigger('clear_calculation');
         schedule_jazira_auto_calculation(frm);
     },
 
-    expense_company_scope(frm) {
-        if (frm.doc.expense_company_scope === 'Allocation Companies') {
-            frm.set_value('expense_source_company', '');
-            frm.set_value('source_offset_account', '');
+    // Clearing account'ni foydalanuvchi qo'lda tanlamasin — kompaniya
+    // tanlangan zahoti standart hisob avtomatik qo'yiladi (kerak bo'lsa
+    // keyin o'zgartirsa bo'ladi).
+    fill_default_clearing_account(frm) {
+        if (!frm.doc.expense_source_company || frm.doc.docstatus !== 0) {
+            return;
         }
-        frm.trigger('clear_calculation');
-        schedule_jazira_auto_calculation(frm);
+        if (frm.doc.source_offset_account) {
+            return;
+        }
+        frappe.call({
+            method: 'jazira_app.jazira_app.doctype.jazira_expense_allocation.jazira_expense_allocation.get_default_clearing_account',
+            args: { company: frm.doc.expense_source_company },
+            callback(r) {
+                if (r.message && !frm.doc.source_offset_account) {
+                    frm.set_value('source_offset_account', r.message);
+                }
+            }
+        });
     },
 
     create_source_reversal(frm) {
@@ -210,19 +219,6 @@ frappe.ui.form.on('Jazira Expense Allocation', {
     profit_source(frm) {
         frm.trigger('clear_calculation');
         schedule_jazira_auto_calculation(frm);
-    },
-
-    clear_source_company_if_not_needed(frm) {
-        if (frm.doc.expense_company_scope !== 'Allocation Companies') {
-            return;
-        }
-
-        if (frm.doc.expense_source_company) {
-            frm.set_value('expense_source_company', '');
-        }
-        if (frm.doc.source_offset_account) {
-            frm.set_value('source_offset_account', '');
-        }
     },
 
     set_default_companies(frm) {
