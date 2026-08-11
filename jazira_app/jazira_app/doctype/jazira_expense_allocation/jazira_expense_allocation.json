@@ -101,10 +101,10 @@
   },
   {
    "default": "1",
-   "description": "Submit қилинганда филиаллар Складга тўлаган деб Payment Entry ҳам яратилади ва қарзга уланади. Пул ҳақиқатан кўчмаган бўлса — белгини олиб ташланг.",
+   "description": "Submit qilinganda filial qarzi взаимозачёт Journal Entry bilan yopiladi — filial allaqachon Skladga topshirgan pul hisobidan. Kassa/naqd hisoblarga TEGILMAYDI, pul harakati yo'q.",
    "fieldname": "create_settlement_payments",
    "fieldtype": "Check",
-   "label": "To'lovni ham yaratish"
+   "label": "Qarzni yopish (взаимозачёт)"
   },
   {
    "fieldname": "currency",

@@ -17,7 +17,8 @@
   "reversal_journal_entry",
   "allocation_journal_entry",
   "branch_payment_entry",
-  "source_payment_entry"
+  "source_payment_entry",
+  "netting_journal_entry"
  ],
  "fields": [
   {
@@ -118,6 +119,14 @@
    "fieldtype": "Link",
    "label": "Sklad qabul to'lovi",
    "options": "Payment Entry",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "netting_journal_entry",
+   "fieldtype": "Link",
+   "label": "Взаимозачёт JE",
+   "options": "Journal Entry",
    "read_only": 1,
    "no_copy": 1
   }

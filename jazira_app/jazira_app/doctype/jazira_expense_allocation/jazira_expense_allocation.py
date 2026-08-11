@@ -55,19 +55,20 @@ class JaziraExpenseAllocation(Document):
         created = []
         created.extend(self.create_expense_reversal_journal_entries())
         created.extend(self.create_allocation_journal_entries())
-        payments = self.create_settlement_payment_entries()
+        nettings = self.create_netting_journal_entries()
         self.db_set("status", "Submitted")
 
         if created:
             msg = _("Xarajat taqsimoti uchun {0} ta Journal Entry yaratildi").format(len(created))
-            if payments:
-                msg += _(" va {0} ta to'lov (Payment Entry)").format(len(payments))
+            if nettings:
+                msg += _(" va {0} ta взаимозачёт (qarz yopish) yozuvi").format(len(nettings))
             frappe.msgprint(msg, indicator="green")
 
     def on_cancel(self):
-        # Tartib muhim: to'lovlar Journal Entry'ga ilingan, shuning uchun
-        # avval to'lovlar bekor qilinadi, keyin yozuvlar.
-        self.cancel_settlement_payment_entries()
+        # Tartib muhim: взаимозачёт/to'lovlar allocation JE'larga ilingan,
+        # shuning uchun avval ular bekor qilinadi, keyin yozuvlar.
+        self.cancel_netting_journal_entries()
+        self.cancel_settlement_payment_entries()  # eski hujjatlardagi PE'lar uchun
         self.cancel_allocation_journal_entries()
         self.cancel_expense_reversal_journal_entries()
         self.db_set("status", "Cancelled")
@@ -989,132 +990,111 @@ class JaziraExpenseAllocation(Document):
         return created
 
     # ------------------------------------------------------------------
-    # To'lovlar (settlement)
+    # Qarzni yopish — взаимозачёт (netting), pul harakatisiz
     # ------------------------------------------------------------------
 
-    def get_cash_account(self, company):
-        account = get_company_default(company, "default_cash_account")
-        if account:
-            return account
-        return frappe.db.get_value(
-            "Account",
-            {"company": company, "account_type": "Cash", "is_group": 0},
-            "name",
-            order_by="lft asc",
-        )
+    def create_netting_journal_entries(self):
+        """Filial qarzini ВЗАИМОЗАЧЁТ bilan yopadi — kassa TEGILMAYDI.
 
-    def _submit_payment_entry(self, company, payment_type, party_type, party,
-                              paid_from, paid_to, amount, reference_doctype,
-                              reference_name, label):
-        """Bitta Payment Entry yaratib, uni tegishli Journal Entry'ga ilaydi."""
-        pe = frappe.new_doc("Payment Entry")
-        pe.payment_type = payment_type
-        pe.company = company
-        pe.posting_date = self.posting_date or self.to_date
-        pe.party_type = party_type
-        pe.party = party
-        pe.paid_from = paid_from
-        pe.paid_to = paid_to
-        pe.paid_amount = amount
-        pe.received_amount = amount
-        pe.source_exchange_rate = 1
-        pe.target_exchange_rate = 1
-        pe.reference_no = self.name
-        pe.reference_date = self.posting_date or self.to_date
-        pe.remarks = (
-            f"{ALLOCATION_REMARK_PREFIX} {self.name} | "
-            f"{self.from_date} - {self.to_date} | {label}"
-        )
+        Biznes haqiqati (tekshirilgan): filiallar har kuni butun tushumini
+        Skladga topshiradi va kassalari doim ~0 da turadi. Ya'ni ma'muriy
+        ulush uchun ular ALLAQACHON pul berib bo'lgan — bu pul filial
+        kitobida "1310 Debtors [Sklad]" debit qoldig'i bo'lib turibdi
+        (Saripul ~1.6 mlrd, XB ~1.1 mlrd). Yangi "naqd to'lov" yaratish
+        o'sha bo'sh kassalarni minusga tushirar edi.
 
-        # Hujjatning "Connections" bo'limida ko'rinishi uchun
-        if payment_entry_has_allocation_field():
-            pe.custom_jazira_expense_allocation = self.name
+        Shuning uchun har filialda bitta JE:
+            Дт 2110 Creditors [Supplier: Sklad]  (ref: allocation JE -> qarz yopiladi)
+                Кт 1310 Debtors [Customer: Sklad]  (topshirilgan pul hisobidan)
 
-        pe.append(
-            "references",
-            {
-                "reference_doctype": reference_doctype,
-                "reference_name": reference_name,
-                "allocated_amount": amount,
-            },
-        )
-
-        pe.flags.ignore_permissions = True
-        pe.insert()
-        pe.submit()
-        return pe.name
-
-    def create_settlement_payment_entries(self):
-        """Filial Skladga to'lagan deb ikki tomonlama to'lov yozuvi yaratadi.
-
-        Filialda:  Дт 2110 Creditors [Sklad]  / Кт Касса      -> qarz yopiladi
-        Skladda:   Дт Касса / Кт 1310 Debtors [filial]        -> pul tushadi
-
-        Har ikkalasi tegishli Journal Entry'ga ilinadi (Payment Entry
-        Reference), shuning uchun qarz "yopilgan" deb hisoblanadi.
+        reference_type='Journal Entry' tufayli Payment Ledger yozuvi aynan
+        allocation JE'ga qarshi tushadi va qarz rasman "yopilgan" bo'ladi
+        (get_outstanding_on_journal_entry = 0). Sklad tomonida hech narsa
+        yaratilmaydi — uning kitobida qoldiqlar allaqachon to'g'ri.
         """
         if not cint(self.get("create_settlement_payments")):
             return []
 
         source_company = self.expense_source_company
-        source_cash = self.get_cash_account(source_company)
-        if not source_cash:
-            frappe.throw(_("'{0}' uchun kassa hisobi topilmadi").format(source_company))
-
         source_supplier = get_internal_supplier(source_company)
-        created = []
+        source_customer = get_internal_customer(source_company)
+        if not source_supplier or not source_customer:
+            frappe.throw(
+                _("'{0}' uchun ichki mijoz/taminotchi topilmadi").format(source_company)
+            )
 
+        created = []
         for row in self.companies:
             amount = flt(row.allocated_expense_amount, 2)
             if amount <= 0 or row.company == source_company:
                 continue
             if not row.allocation_journal_entry:
                 continue
-            if row.branch_payment_entry and frappe.db.exists("Payment Entry", row.branch_payment_entry):
+            if row.get("netting_journal_entry") and frappe.db.exists(
+                "Journal Entry", row.netting_journal_entry
+            ):
                 continue
 
-            branch_cash = self.get_cash_account(row.company)
-            if not branch_cash:
-                frappe.throw(_("'{0}' uchun kassa hisobi topilmadi").format(row.company))
+            receivable = get_default_clearing_account(row.company)
+            if not receivable:
+                frappe.throw(
+                    _("'{0}' uchun debitorlik (1310) hisobi topilmadi").format(row.company)
+                )
 
-            # 1) Filial to'laydi
-            branch_pe = self._submit_payment_entry(
-                company=row.company,
-                payment_type="Pay",
-                party_type="Supplier",
-                party=source_supplier,
-                paid_from=branch_cash,
-                paid_to=row.offset_account,
-                amount=amount,
-                reference_doctype="Journal Entry",
-                reference_name=row.allocation_journal_entry,
-                label=f"{row.company} to'lovi",
+            je = frappe.new_doc("Journal Entry")
+            je.voucher_type = "Journal Entry"
+            je.company = row.company
+            je.posting_date = self.posting_date or self.to_date
+            je.user_remark = (
+                f"{ALLOCATION_REMARK_PREFIX} {self.name} | "
+                f"{self.from_date} - {self.to_date} | {row.company} взаимозачёт"
             )
+            if journal_entry_has_allocation_field():
+                je.custom_jazira_expense_allocation = self.name
 
-            # 2) Sklad qabul qiladi
-            customer = get_internal_customer(row.company)
-            source_pe = self._submit_payment_entry(
-                company=source_company,
-                payment_type="Receive",
-                party_type="Customer",
-                party=customer,
-                paid_from=self.source_offset_account,
-                paid_to=source_cash,
-                amount=amount,
-                reference_doctype="Journal Entry",
-                reference_name=self.source_reversal_journal_entry,
-                label=f"{row.company} dan qabul",
+            # Дт — Skladga qarz yopiladi, allocation JE'ga ilinadi
+            je.append("accounts", {
+                "account": row.offset_account,
+                "party_type": "Supplier",
+                "party": source_supplier,
+                "debit_in_account_currency": amount,
+                "credit_in_account_currency": 0,
+                "reference_type": "Journal Entry",
+                "reference_name": row.allocation_journal_entry,
+                "user_remark": je.user_remark,
+            })
+            # Кт — allaqachon Skladga topshirilgan pul hisobidan
+            je.append("accounts", {
+                "account": receivable,
+                "party_type": "Customer",
+                "party": source_customer,
+                "debit_in_account_currency": 0,
+                "credit_in_account_currency": amount,
+                "user_remark": je.user_remark,
+            })
+
+            je.flags.ignore_permissions = True
+            je.insert()
+            je.submit()
+
+            frappe.db.set_value(
+                row.doctype, row.name, "netting_journal_entry", je.name,
+                update_modified=False,
             )
-
-            frappe.db.set_value(row.doctype, row.name, {
-                "branch_payment_entry": branch_pe,
-                "source_payment_entry": source_pe,
-            }, update_modified=False)
-            row.branch_payment_entry = branch_pe
-            row.source_payment_entry = source_pe
-            created.extend([branch_pe, source_pe])
+            row.netting_journal_entry = je.name
+            created.append(je.name)
 
         return created
+
+    def cancel_netting_journal_entries(self):
+        for row in self.companies:
+            name = row.get("netting_journal_entry")
+            if not name or not frappe.db.exists("Journal Entry", name):
+                continue
+            je = frappe.get_doc("Journal Entry", name)
+            if je.docstatus == 1:
+                je.flags.ignore_permissions = True
+                je.cancel()
 
     def cancel_settlement_payment_entries(self):
         for row in self.companies:
