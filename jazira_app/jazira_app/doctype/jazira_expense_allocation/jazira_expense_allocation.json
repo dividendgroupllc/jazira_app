@@ -138,12 +138,12 @@
    "label": "Hisoblash sozlamalari"
   },
   {
-   "default": "GL Sales Profit",
-   "description": "GL Sales Profit POS/Sales va tannarx GL yozuvlarini oladi, oddiy Journal Entry xarajatlarini proporsiya bazasidan chiqaradi.",
+   "default": "Маржинал (манба) / Соф фойда (филиаллар)",
+   "description": "Manba (Sklad): маржинал foyda (Выручка − Себестоимость). Filiallar: соф foyda (barcha xarajatlari ayirilgan). Zarar ko'rgan filial ulush olmaydi.",
    "fieldname": "profit_source",
    "fieldtype": "Select",
    "label": "Foyda manbasi",
-   "options": "GL Sales Profit\nGL Net Profit\nSales Invoice Gross Profit",
+   "options": "Маржинал (манба) / Соф фойда (филиаллар)\nGL Sales Profit\nGL Net Profit\nSales Invoice Gross Profit",
    "reqd": 1
   },
   {

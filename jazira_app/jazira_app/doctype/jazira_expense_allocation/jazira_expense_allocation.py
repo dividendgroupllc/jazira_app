@@ -9,6 +9,9 @@ from frappe.utils import cint, flt, get_first_day, get_last_day, getdate
 
 ALLOCATION_REMARK_PREFIX = "Jazira Expense Allocation:"
 
+# Aralash foyda bazasi: manba kompaniya — маржинал, filiallar — соф foyda.
+MIXED_PROFIT_SOURCE = "Маржинал (манба) / Соф фойда (филиаллар)"
+
 # Taqsimlanadigan xarajat guruhi — faqat ma'muriy (Адм) xarajatlar.
 # Operatsion (52001) xarajatlar har filialning o'zida qoladi va hovuzga kirmaydi.
 ADMIN_EXPENSE_GROUP = "52002"
@@ -351,11 +354,55 @@ class JaziraExpenseAllocation(Document):
         if not company:
             return 0
 
+        if self.profit_source == MIXED_PROFIT_SOURCE:
+            # Manba (Sklad): МАРЖИНАЛ foyda — Выручка − Себестоимость.
+            # Sababi: Skladning o'z JE xarajatlari aynan taqsimlanadigan
+            # hovuzning o'zi — ularni foydadan ayirib yuborsak, Sklad ulushi
+            # sun'iy kichrayib, yuk filiallarga og'ib ketardi.
+            #
+            # Filiallar: СОФ (chistaya) foyda — barcha xarajatlari ayirilgan
+            # haqiqiy natija. Zarar ko'rgan filial bazasi 0 bo'ladi va u
+            # ma'muriy yuk olmaydi.
+            if company == self.expense_source_company:
+                return self.get_marginal_profit(company)
+            return self.get_gl_profit(company, include_journal_entries=True)
+
         if self.profit_source == "Sales Invoice Gross Profit":
             return self.get_sales_invoice_gross_profit(company)
 
         include_journal_entries = self.profit_source == "GL Net Profit"
         return self.get_gl_profit(company, include_journal_entries=include_journal_entries)
+
+    def get_marginal_profit(self, company):
+        """Маржинал foyda = Выручка − Себестоимость (PL Hisoboti bilan bir xil).
+
+        Себестоимость = account_type 'Cost of Goods Sold' + 'Stock Adjustment'
+        (har qanday hujjat turidan). Operatsion/ma'muriy xarajatlar ayirilmaydi.
+        """
+        allocation_filter = self.get_journal_entry_exclusion_sql("je")
+
+        result = frappe.db.sql(
+            f"""
+            SELECT COALESCE(SUM(gle.credit - gle.debit), 0) AS profit
+            FROM `tabGL Entry` gle
+            INNER JOIN `tabAccount` acc ON acc.name = gle.account
+            LEFT JOIN `tabJournal Entry` je
+                ON je.name = gle.voucher_no AND gle.voucher_type = 'Journal Entry'
+            WHERE gle.company = %(company)s
+                AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
+                AND gle.is_cancelled = 0
+                AND gle.voucher_type != 'Period Closing Voucher'
+                AND (
+                    acc.root_type = 'Income'
+                    OR acc.account_type IN ('Cost of Goods Sold', 'Stock Adjustment')
+                )
+                AND {allocation_filter}
+            """,
+            self.get_query_params(company),
+            as_dict=True,
+        )
+
+        return flt(result[0].profit if result else 0, 2)
 
     def get_gl_profit(self, company, include_journal_entries=False):
         allocation_filter = self.get_journal_entry_exclusion_sql("je")
