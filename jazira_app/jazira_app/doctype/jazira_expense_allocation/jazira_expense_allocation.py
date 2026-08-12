@@ -111,6 +111,16 @@ class JaziraExpenseAllocation(Document):
         if not self.expense_source_company:
             frappe.throw(_("Xarajat manba kompaniyasi majburiy"))
 
+        # Guruh kompaniyasi (masalan "Jazira") manba bo'la olmaydi — unda
+        # hech qanday operatsiya yuritilmaydi, hovuz doim 0 chiqadi.
+        if frappe.db.get_value("Company", self.expense_source_company, "is_group"):
+            frappe.throw(
+                _(
+                    "'{0}' — guruh kompaniyasi, xarajat manba bo'la olmaydi. "
+                    "Ishchi kompaniyani tanlang (masalan Jazira Sklad)."
+                ).format(self.expense_source_company)
+            )
+
     def set_source_offset_account(self):
         if not cint(self.create_source_reversal):
             return

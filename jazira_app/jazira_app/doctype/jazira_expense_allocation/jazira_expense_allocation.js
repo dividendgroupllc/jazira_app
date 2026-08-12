@@ -54,8 +54,28 @@ function can_calculate(frm, show_message) {
 }
 
 function run_jazira_calculation(frm, automatic=false) {
-    if (frm.doc.docstatus !== 0 || frm.__auto_calculating) {
+    if (frm.doc.docstatus !== 0) {
         return;
+    }
+
+    if (frm.__auto_calculating) {
+        if (automatic) {
+            return;
+        }
+        // Foydalanuvchi Hisoblash bosdi, lekin avtomatik hisob hali ketmoqda.
+        // Avval bosish INDAMAY tashlab yuborilardi ("tugma ishlamayapti"
+        // degan taassurot). Endi: kutib turamiz-da, tugagach qayta urinamiz.
+        clearTimeout(frm.__auto_calculation_timer);
+        (frm.__calc_promise || Promise.resolve()).finally(() => {
+            run_jazira_calculation(frm);
+        });
+        return;
+    }
+
+    if (!automatic) {
+        // Qo'lda bosilganda navbatda turgan avtomatik hisobni bekor qilamiz —
+        // ikki marta ketmasin.
+        clearTimeout(frm.__auto_calculation_timer);
     }
 
     if (!can_calculate(frm, !automatic)) {
@@ -76,7 +96,7 @@ function run_jazira_calculation(frm, automatic=false) {
         frm.__last_auto_calculation_key = calculation_key;
     }
 
-    return frm.call({
+    return frm.__calc_promise = frm.call({
         doc: frm.doc,
         method: 'calculate',
         args: {
@@ -114,6 +134,12 @@ function schedule_jazira_auto_calculation(frm) {
 
 frappe.ui.form.on('Jazira Expense Allocation', {
     setup(frm) {
+        // Guruh kompaniyasi ("Jazira") manba bo'la olmaydi — unda operatsiya
+        // yo'q, tanlansa hamma raqam 0 chiqib chalg'itardi.
+        frm.set_query('expense_source_company', () => ({
+            filters: { is_group: 0 }
+        }));
+
         frm.fields_dict.companies.grid.get_field('expense_account').get_query = function(doc, cdt, cdn) {
             const row = locals[cdt][cdn];
             return {
