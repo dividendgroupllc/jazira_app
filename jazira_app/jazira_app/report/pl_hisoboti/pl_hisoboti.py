@@ -28,9 +28,6 @@ from frappe.utils import flt, getdate
 from datetime import date, timedelta
 
 
-CARD_COLORS = ["#2563EB", "#059669", "#7C3AED", "#DC2626", "#0891B2", "#D97706", "#BE185D"]
-
-
 # ─── Entry point ─────────────────────────────────────────────────────────────
 
 def execute(filters=None):
@@ -57,9 +54,8 @@ def execute(filters=None):
 
 	columns = get_columns(period_list)
 	data = build_rows(period_list, pdata, opex_accounts)
-	summary_html = get_summary_html(company, filters, period_list, pdata)
 
-	return columns, data, summary_html
+	return columns, data
 
 
 # ─── Period list (Pokiza bilan bir xil dvigatel) ────────────────────────────
@@ -355,173 +351,3 @@ def build_rows(period_list, pdata, opex_accounts=None):
 		row_type="percent", level=1, is_percent=True))
 
 	return rows
-
-
-# ─── Summary HTML (dizayn paneli) ────────────────────────────────────────────
-
-def _fmt(val):
-	v = abs(flt(val))
-	if v >= 1_000_000_000:
-		return f"{v / 1_000_000_000:.2f}B"
-	elif v >= 1_000_000:
-		return f"{v / 1_000_000:.1f}M"
-	elif v >= 1_000:
-		return f"{v / 1_000:.0f}K"
-	return f"{v:,.0f}"
-
-
-def _bar(pct, color, bg):
-	w = min(max(flt(pct), 0), 100)
-	return f"""
-		<div style="background:{bg};height:6px;border-radius:3px;overflow:hidden;margin-top:4px;">
-		  <div style="background:{color};height:100%;width:{w:.1f}%;border-radius:3px;"></div>
-		</div>"""
-
-
-def get_summary_html(company, filters, period_list, pdata):
-	from_date = filters.get("from_date", "")
-	to_date = filters.get("to_date", "")
-	periodicity = filters.get("periodicity", "Yearly")
-	currency = frappe.get_cached_value("Company", company, "default_currency") or "UZS"
-
-	header = f"""
-	<div style="background:linear-gradient(135deg,#0f2942 0%,#1e3a5f 60%,#1a4f72 100%);
-				color:white;padding:20px 24px;border-radius:12px;margin-bottom:16px;
-				display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-	  <div>
-		<div style="font-size:10px;letter-spacing:2.5px;text-transform:uppercase;
-					opacity:0.6;margin-bottom:4px;">ФОЙДА — ЗАРАР ҲИСОБОТИ</div>
-		<div style="font-size:20px;font-weight:700;letter-spacing:-0.3px;">{frappe.utils.escape_html(company)} &nbsp;·&nbsp; P&amp;L Report</div>
-	  </div>
-	  <div style="text-align:right;opacity:0.75;font-size:12px;line-height:1.6;">
-		<div>{from_date} — {to_date}</div>
-		<div style="font-size:10px;opacity:0.7;margin-top:2px;">{periodicity}</div>
-	  </div>
-	</div>"""
-
-	cards_html = ""
-	for i, p in enumerate(period_list):
-		d = pdata[p["key"]]
-		marginal = d["revenue"] - d["cogs"]
-		opex = (sum(d["operational"].values()) + sum(d["admin"].values())
-				+ sum(d["other_uncategorized"].values()))
-		np = marginal - opex
-
-		gm_pct = (marginal / d["revenue"] * 100) if d["revenue"] else 0
-		nm_pct = (np / d["revenue"] * 100) if d["revenue"] else 0
-		color = CARD_COLORS[i % len(CARD_COLORS)]
-
-		if i > 0:
-			prev_rev = pdata[period_list[i - 1]["key"]]["revenue"]
-			delta = d["revenue"] - prev_rev
-			if prev_rev:
-				trend_pct = delta / prev_rev * 100
-				trend_ico = "▲" if delta >= 0 else "▼"
-				trend_clr = "#10b981" if delta >= 0 else "#ef4444"
-				trend_str = f'<span style="color:{trend_clr};font-size:10px;font-weight:600;">{trend_ico} {abs(trend_pct):.1f}%</span>'
-			else:
-				trend_str = ""
-		else:
-			trend_str = ""
-
-		gm_bar = _bar(gm_pct, "#10b981", "#ecfdf5")
-		nm_bar = _bar(nm_pct, color, "#eff6ff")
-
-		cards_html += f"""
-		<div style="flex:1;min-width:180px;background:white;border-radius:10px;
-					box-shadow:0 1px 8px rgba(0,0,0,0.07);overflow:hidden;
-					border:1px solid #f0f0f0;">
-		  <div style="background:{color};padding:10px 14px;
-					  display:flex;align-items:center;justify-content:space-between;">
-			<span style="color:white;font-size:13px;font-weight:700;">{p['label']}</span>
-			{trend_str}
-		  </div>
-		  <div style="padding:14px 16px;">
-			<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid #f5f5f5;">
-			  <div style="font-size:9px;color:#aaa;text-transform:uppercase;
-						  letter-spacing:1px;margin-bottom:2px;">Выручка</div>
-			  <div style="font-size:22px;font-weight:800;color:#111;line-height:1.1;">
-				{_fmt(d['revenue'])}
-			  </div>
-			  <div style="font-size:10px;color:#aaa;margin-top:1px;">{currency}</div>
-			</div>
-
-			<div style="margin-bottom:10px;">
-			  <div style="display:flex;justify-content:space-between;align-items:center;">
-				<span style="font-size:10px;color:#777;">Маржинал foyda</span>
-				<span style="font-size:11px;font-weight:700;color:#10b981;">{gm_pct:.1f}%</span>
-			  </div>
-			  {gm_bar}
-			  <div style="font-size:9px;color:#bbb;margin-top:2px;">{_fmt(marginal)} {currency}</div>
-			</div>
-
-			<div>
-			  <div style="display:flex;justify-content:space-between;align-items:center;">
-				<span style="font-size:10px;color:#777;">Sof foyda</span>
-				<span style="font-size:11px;font-weight:700;color:{color};">{nm_pct:.1f}%</span>
-			  </div>
-			  {nm_bar}
-			  <div style="font-size:9px;color:#bbb;margin-top:2px;">{_fmt(np)} {currency}</div>
-			</div>
-		  </div>
-		</div>"""
-
-	cards_section = f"""
-	<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-	  {cards_html}
-	</div>"""
-
-	cost_bars = ""
-	for i, p in enumerate(period_list):
-		d = pdata[p["key"]]
-		rev = d["revenue"]
-		if not rev:
-			continue
-		cogs_pct = d["cogs"] / rev * 100
-		op_pct = sum(d["operational"].values()) / rev * 100
-		adm_pct = sum(d["admin"].values()) / rev * 100
-		oth_pct = sum(d["other_uncategorized"].values()) / rev * 100
-		profit_pct = max(100 - cogs_pct - op_pct - adm_pct - oth_pct, 0)
-		color = CARD_COLORS[i % len(CARD_COLORS)]
-
-		cost_bars += f"""
-		<div style="margin-bottom:12px;">
-		  <div style="display:flex;justify-content:space-between;
-					  align-items:center;margin-bottom:5px;">
-			<span style="font-size:11px;font-weight:600;color:#333;">{p['label']}</span>
-			<span style="font-size:10px;color:#888;">{_fmt(rev)} {currency}</span>
-		  </div>
-		  <div style="display:flex;height:18px;border-radius:6px;overflow:hidden;gap:1px;">
-			<div style="flex:{cogs_pct:.1f};background:#ef4444;" title="COGS {cogs_pct:.1f}%"></div>
-			<div style="flex:{op_pct:.1f};background:#f97316;" title="Операционный {op_pct:.1f}%"></div>
-			<div style="flex:{adm_pct:.1f};background:#8b5cf6;" title="Адм. {adm_pct:.1f}%"></div>
-			<div style="flex:{oth_pct:.1f};background:#6b7280;" title="Прочие {oth_pct:.1f}%"></div>
-			<div style="flex:{profit_pct:.1f};background:#10b981;" title="Foyda {profit_pct:.1f}%"></div>
-		  </div>
-		  <div style="display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;">
-			<span style="font-size:9px;color:#ef4444;">■ COGS {cogs_pct:.0f}%</span>
-			<span style="font-size:9px;color:#f97316;">■ Операционный {op_pct:.0f}%</span>
-			<span style="font-size:9px;color:#8b5cf6;">■ Адм. {adm_pct:.0f}%</span>
-			<span style="font-size:9px;color:#6b7280;">■ Прочие {oth_pct:.0f}%</span>
-			<span style="font-size:9px;color:#10b981;">■ Foyda {profit_pct:.0f}%</span>
-		  </div>
-		</div>"""
-
-	structure_section = ""
-	if cost_bars:
-		structure_section = f"""
-		<div style="background:white;border-radius:10px;padding:16px 20px;
-					box-shadow:0 1px 8px rgba(0,0,0,0.07);border:1px solid #f0f0f0;">
-		  <div style="font-size:11px;font-weight:700;color:#333;
-					  text-transform:uppercase;letter-spacing:1px;margin-bottom:14px;">
-			Даромаддан тузилиши
-		  </div>
-		  {cost_bars}
-		</div>"""
-
-	return f"""
-	<div style="margin:20px 0;font-family:'Segoe UI',Arial,sans-serif;">
-	  {header}
-	  {cards_section}
-	  {structure_section}
-	</div>"""

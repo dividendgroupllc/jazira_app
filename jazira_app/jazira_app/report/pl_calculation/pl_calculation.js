@@ -8,8 +8,8 @@
 // Frappe onload'dan keyin ham inner toolbar'ni tozalashi mumkin, shunda
 // tugma yo'qolib qoladi. Shuning uchun tugma ikkita nuqtada — onload'da va
 // jadval chizilgandan keyin — qayta qo'yiladi. Qo'yish idempotent: o'z
-// belgisi (btn-pl-hisoboti-pdf) bo'lsa qaytadan qo'shilmaydi.
-function jazira_pl_hisoboti_pdf_button(report) {
+// belgisi (btn-pl-calculation-pdf) bo'lsa qaytadan qo'shilmaydi.
+function jazira_pl_calculation_pdf_button(report) {
 	if (!report || !report.page || !report.page.inner_toolbar) return;
 
 	// Frappe'ning page.html'ida inner toolbar shunday e'lon qilingan:
@@ -19,36 +19,24 @@ function jazira_pl_hisoboti_pdf_button(report) {
 	// mo'ljallangani sababli shu yashirishni bekor qilamiz.
 	report.page.inner_toolbar.removeClass("hidden-xs hidden-md");
 
-	if (report.page.inner_toolbar.find(".btn-pl-hisoboti-pdf").length) return;
+	if (report.page.inner_toolbar.find(".btn-pl-calculation-pdf").length) return;
 
 	const $btn = report.page.add_inner_button(__("PDF"), function () {
 		const filters = frappe.query_report.get_filter_values();
-		if (!filters.company) {
-			frappe.show_alert({ message: __("Аввал компанияни танланг"), indicator: "orange" });
-			return;
-		}
 		if (!filters.from_date || !filters.to_date) {
 			frappe.show_alert({ message: __("Аввал 'Дан' ва 'Гача' санасини танланг"), indicator: "orange" });
 			return;
 		}
 		// PDF serverda saqlanmaydi — to'g'ridan-to'g'ri yuklab olinadi.
-		window.open("/api/method/jazira_app.jazira_app.report.pl_hisoboti.pl_hisoboti_pdf.generate_pl_pdf"
+		window.open("/api/method/jazira_app.jazira_app.report.pl_calculation.pl_calculation_pdf.generate_pl_calculation_pdf"
 			+ "?filters=" + encodeURIComponent(JSON.stringify(filters)));
 	});
 
-	if ($btn && $btn.addClass) $btn.addClass("btn-pl-hisoboti-pdf").addClass("btn-primary");
+	if ($btn && $btn.addClass) $btn.addClass("btn-pl-calculation-pdf").addClass("btn-primary");
 }
 
-frappe.query_reports["PL Hisoboti"] = {
+frappe.query_reports["PL Calculation"] = {
 	"filters": [
-		{
-			"fieldname": "company",
-			"label": __("Компания"),
-			"fieldtype": "Link",
-			"options": "Company",
-			"default": frappe.defaults.get_user_default("Company"),
-			"reqd": 1
-		},
 		{
 			"fieldname": "from_date",
 			"label": __("Дан"),
@@ -68,37 +56,43 @@ frappe.query_reports["PL Hisoboti"] = {
 			"label": __("Давр"),
 			"fieldtype": "Select",
 			"options": "Yearly\nHalf-Yearly\nQuarterly\nMonthly",
-			"default": "Yearly",
+			"default": "Monthly",
+			"reqd": 1
+		},
+		{
+			// Филиаллар P&L ва шериклар ҳисоби битта ҳисоботда — керакли
+			// қисмини шу фильтр билан ажратиб олинади.
+			"fieldname": "section",
+			"label": __("Бўлим"),
+			"fieldtype": "Select",
+			"options": "Ҳаммаси\nФилиаллар P&L\nШериклар ҳисоби",
+			"default": "Ҳаммаси",
 			"reqd": 1
 		}
 	],
 
-	// Sodda oq-qora dizayn: fon rangi yo'q, faqat asosiy (root/result/sub)
-	// qatorlar bold, tafsilot qatorlari oddiy vazn bilan ajratiladi.
+	// Ҳар филиал блоки ва ҳар счёт гуруҳи яйилади.
 	tree: true,
 	name_field: "label",
-	initial_depth: 0,
+	initial_depth: 1,
 
 	onload: function (report) {
-		jazira_pl_hisoboti_pdf_button(report);
+		jazira_pl_calculation_pdf_button(report);
 	},
 
 	// Jadval har chizilganda tugma joyidaligi qayta tekshiriladi.
 	after_datatable_render: function () {
-		jazira_pl_hisoboti_pdf_button(frappe.query_report);
+		jazira_pl_calculation_pdf_button(frappe.query_report);
 	},
 
 	"formatter": function (value, row, column, data, default_formatter) {
 		const rt = data ? data.row_type : null;
 
-		// ── Chap ustun (Кўрсаткич) — ierarxiya bo'yicha ajratilgan ──────────────
 		if (column.fieldname === "label") {
 			if (!data || rt === "divider") return "";
-			const level = data.indent_level || 0;
-			const pad = 6 + level * 22;
 			// Rang qattiq kodlanmaydi — Frappe temasi o'zgaruvchisi ishlatiladi,
 			// shunda light va dark rejimda ham o'qiladi.
-			let s = `padding-left:${pad}px;white-space:nowrap;color:var(--text-color);`;
+			let s = "white-space:nowrap;color:var(--text-color);";
 			if (rt === "root") {
 				s += "font-weight:700;text-transform:uppercase;letter-spacing:.3px;";
 			} else if (rt === "result") {
@@ -107,34 +101,20 @@ frappe.query_reports["PL Hisoboti"] = {
 				s += "font-weight:600;";
 			} else if (rt === "detail") {
 				s += "font-size:12.5px;";
-			} else if (rt === "percent" || rt === "ratio") {
-				s += "font-style:italic;font-size:11.5px;";
+			} else if (rt === "percent") {
+				s += "font-style:italic;font-size:11.5px;color:var(--text-muted);";
 			}
-			const label = frappe.utils.escape_html(data.label || "");
-			return `<div style="${s}">${label}</div>`;
+			return `<span style="${s}">${frappe.utils.escape_html(data.label || "")}</span>`;
 		}
 
-		// ── Qiymat ustunlari ────────────────────────────────────────────────────
 		if (!data || rt === "divider") return "";
 		if (value === null || value === undefined || value === "") return "";
 		const num = flt(value);
 
-		// Foiz qatorlari
 		if (rt === "percent") {
-			const v = Math.round(num);
-			return `<span style="font-style:italic;font-weight:600;color:var(--text-muted);">${v}%</span>`;
+			return `<span style="font-style:italic;font-weight:600;color:var(--text-muted);">${Math.round(num)}%</span>`;
 		}
 
-		// Nisbat (ўртача чек) — 2 xonali
-		if (rt === "ratio") {
-			const v = num.toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-			return `<span style="font-style:italic;color:var(--text-muted);">${v}</span>`;
-		}
-
-		// Oddiy summalar — kasrsiz (.00 yo'q), mingliklar probel bilan.
-		// Avval yaxlitlanadi, keyin manfiy/musbatligi shundan aniqlanadi —
-		// aks holda -0.24 kabi juda kichik qoldiqlar "(0)" bo'lib chalkash
-		// ko'rinib qolardi.
 		const rounded = Math.round(num);
 		const w = (rt === "root" || rt === "result") ? 800 : (rt === "sub" ? 700 : 400);
 
