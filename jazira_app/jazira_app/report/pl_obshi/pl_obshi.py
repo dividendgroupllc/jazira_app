@@ -728,16 +728,23 @@ def build_rows(period_list, companies, pdata, eliminate=1, add_back=1):
 		if all_zero(vm):
 			continue
 		rows.append(mk(f"{owner['label']} улуши", vm, "sub", 1))
+		# Ичкаридаги қаторлар отасига АНИҚ қўшилиши шарт. Шунинг учун улар ҳам
+		# компаниянинг СОФ фойдасидан ҳисобланади (аввал бу ерда фойдага
+		# эгалар ойлиги қўшилган ҳолат ишлатилган эди — шунда Склад зарарда
+		# турса ҳам унинг улуши мусбат чиқиб, чалкаш кўринарди), эганинг ўз
+		# ойлиги эса алоҳида қатор бўлиб қўшилади.
 		for co in companies:
 			pct = get_shares(co).get(owner["key"], 0)
 			if not pct:
 				continue
-			cvm = per_period(
-				lambda d, c=co, p=pct: _co_distributable(d["companies"][c], add_back) * p
-			)
+			cvm = per_period(lambda d, c=co, p=pct: _co_profit(d["companies"][c]) * p)
 			if all_zero(cvm):
 				continue
 			rows.append(mk(f"{company_label(co)} ({pct * 100:.0f}%)", cvm, "detail", 2))
+		if add_back:
+			svm = per_period(lambda d, k=owner["key"]: flt(d["owner_salary"].get(k, 0)))
+			if not all_zero(svm):
+				rows.append(mk("(+) ўз ойлиги", svm, "detail", 2))
 
 	# ── ЭГАЛАР ОЛГАНИ ────────────────────────────────────────────────────────
 	taken_vm = per_period(lambda d: sum(d["owner_taken"].values())
