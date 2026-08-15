@@ -31,9 +31,11 @@ def build_html(filters):
 @frappe.whitelist()
 def generate_pl_pdf(filters):
 	import json
+	pl_pdf.check_report_permission("PL Hisoboti")
 	if isinstance(filters, str):
 		filters = json.loads(filters)
 	if not (filters or {}).get("company"):
 		frappe.throw("Аввал компанияни танланг")
 	pl_pdf.send(filters, execute, _title(filters), "Фойда — зарар ҳисоботи",
-				"PL_" + str(filters.get("company") or "").replace(" ", "_"))
+				"PL_" + str(filters.get("company") or "").replace(" ", "_"),
+				report_name="PL Hisoboti")

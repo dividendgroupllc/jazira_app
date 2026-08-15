@@ -58,6 +58,7 @@ from jazira_app.jazira_app.report.pl_obshi.pl_obshi import (
 	_co_op,
 	_co_other,
 	_co_profit,
+	ADJ_KIND_LABELS,
 )
 
 SECTION_ALL = "Ҳаммаси"
@@ -224,12 +225,20 @@ def build_rows(period_list, companies, pdata, section, opening=None):
 				("cogs_raw", "Сырьевая себестоимость"),
 				("cogs_adj", "Убыток от себестоимости"),
 				("kassa", "Foyda/Zarar Kassa"),
-				("brak", "Брак"),
+				("brak", "Брак (нобуд товар)"),
 			]:
 				bvm = per_period(lambda d, c=co, b=bucket: flt(cd_of(d, c)[b]))
 				if all_zero(bvm):
 					continue
 				rows.append(mk(blabel, bvm, "detail", 2, is_cost=True))
+				# Омбор тафовути сабаби бўйича ажратилади (ҳужжат туридан).
+				if bucket == "cogs_adj":
+					for kind, kind_label in ADJ_KIND_LABELS:
+						kvm = per_period(
+							lambda d, c=co, k=kind: flt(cd_of(d, c)["adj"].get(k, 0)))
+						if all_zero(kvm):
+							continue
+						rows.append(mk(kind_label, kvm, "detail", 3, is_cost=True))
 
 			rows.append(mk("Маржинальная прибыль", marginal, "result", 1))
 			rows.append(mk(

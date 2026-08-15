@@ -81,10 +81,15 @@ INDIRECT_GROUP = "5200"
 #                              5249 Xalq Banki Foydasi, 5213 Kassa Farq).
 #   Brak                     — яроқсиз/нобуд товар.
 #
-# Охирги иккитаси счётлар режасида 52001 (Операционный) остида турибди,
-# лекин моҳияти бўйича таннарх. Шунинг учун улар Себестоимость ичига
-# олинади ВА операцион харажатлардан чиқарилади — акс ҳолда икки марта
-# саналиб, маржинал фойда бузилар эди.
+# Охирги иккитаси харажат счётлари орасида турибди, лекин моҳияти бўйича
+# таннарх. Шунинг учун улар Себестоимость ичига олинади ВА операцион
+# харажатлардан чиқарилади — акс ҳолда икки марта саналиб, маржинал фойда
+# бузилар эди.
+#
+# ДИҚҚАТ: бу счётлар ҳар хил гуруҳда туриши мумкин. Масалан жонли базада
+# "5246/5248/5249 ... Foydasi" — 52001 остида, "5213 Kassa Farq" эса
+# "5200 Indirect Expenses" остида. Шунинг учун тоифалаш ота-гуруҳга
+# БОҒЛАНМАГАН: счёт рақами ёки номи бўйича топилади.
 #
 # Эслатма: "Brak" счёти ҳозирча счётлар режасида ЙЎҚ. Яратилса (номида
 # "brak"/"брак" бўлса) қатор ўзи пайдо бўлади, кодга тегиш шарт эмас.
@@ -92,9 +97,35 @@ KASSA_PL_ACCOUNT_NUMBERS = {"5213", "5246", "5248", "5249"}
 KASSA_PL_NAME_PATTERNS = ("foydasi", "kassa farq", "kassa farqi")
 BRAK_NAME_PATTERNS = ("brak", "брак")
 
+# ── БРАК қаердан олинади ─────────────────────────────────────────────────────
+#
+# Жазирада брак (нобуд товар) АЛОҲИДА счёт ёки ҳужжат тури билан эмас,
+# оддий Stock Entry / "Material Issue" орқали ҳисобдан чиқарилади ва
+# 5119 Stock Adjustment'га тушади.
+#
+# Material Issue ичида бракни бошқа нарсадан ажратадиган белги ЙЎҚ:
+# изоҳ (remarks) 206 ҳужжатнинг ҳаммасида бўш, омбор битта, Item Group эса
+# аралаш (Сырьё ичида ҳам помидор, ҳам қўлқоп/латта/ёқилғи бор). Шунинг
+# учун Material Issue'нинг ҲАММАСИ брак деб олинади — у ҳар ҳолда даромад
+# келтирмасдан ҳисобдан чиққан товар.
+#
+# Келажакда алоҳида "Brak" номли Stock Entry Type очилса, у ҳам шу қаторга
+# тушади (adj_kind = 'brak').
+BRAK_ADJ_KINDS = {"brak", "writeoff"}
+
+# "Убыток от себестоимости" (5119) ичида БРАКДАН ташқари қолган сабаблар.
+ADJ_KIND_LABELS = [
+	("recon", "инвентаризация фарқи (Stock Reconciliation)"),
+	("mfg", "ишлаб чиқариш фарқи (Manufacture)"),
+	("other", "бошқа омбор тафовути"),
+]
+
 
 def _classify_cost_bucket(account_number, account_name):
-	"""52001 остидаги счёт аслида таннарх таркибими? Ҳа бўлса — қайси қисми."""
+	"""Счёт аслида таннарх таркибими? Ҳа бўлса — қайси қисми (kassa/brak).
+
+	Ота-гуруҳдан қатъи назар ишлайди — счёт 52001'да ҳам, 5200'да ҳам
+	турган бўлиши мумкин."""
 	name = (account_name or "").strip().lower()
 	if any(p in name for p in BRAK_NAME_PATTERNS):
 		return "brak"
@@ -200,17 +231,28 @@ def fetch_gl(companies, from_date, to_date):
 			TRIM(IFNULL(parent_acc.account_number, '')) AS parent_number,
 			acc.root_type,
 			acc.account_type,
+			CASE
+				WHEN acc.account_type != 'Stock Adjustment' THEN ''
+				WHEN LOWER(IFNULL(se.stock_entry_type, '')) LIKE '%%brak%%'
+				  OR LOWER(IFNULL(se.stock_entry_type, '')) LIKE '%%брак%%' THEN 'brak'
+				WHEN gle.voucher_type = 'Stock Reconciliation' THEN 'recon'
+				WHEN se.purpose = 'Material Issue' THEN 'writeoff'
+				WHEN se.purpose = 'Manufacture' THEN 'mfg'
+				ELSE 'other'
+			END AS adj_kind,
 			SUM(gle.debit) AS debit,
 			SUM(gle.credit) AS credit
 		FROM `tabGL Entry` gle
 		JOIN `tabAccount` acc ON acc.name = gle.account
 		LEFT JOIN `tabAccount` parent_acc ON parent_acc.name = acc.parent_account
+		LEFT JOIN `tabStock Entry` se
+			ON se.name = gle.voucher_no AND gle.voucher_type = 'Stock Entry'
 		WHERE gle.company IN %(companies)s
 		  AND gle.is_cancelled = 0
 		  AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
 		  AND gle.voucher_type != 'Period Closing Voucher'
 		  AND acc.root_type IN ('Income', 'Expense')
-		GROUP BY gle.company, gle.posting_date, gle.account
+		GROUP BY gle.company, gle.posting_date, gle.account, adj_kind
 		""",
 		{"companies": tuple(companies), "from_date": from_date, "to_date": to_date},
 		as_dict=True,
@@ -230,6 +272,10 @@ def fetch_internal_sales(companies, from_date, to_date):
 		WHERE gle.voucher_type = 'Sales Invoice'
 		  AND gle.company IN %(companies)s
 		  AND gle.is_cancelled = 0
+		  -- Бекор қилинган ҳужжатнинг тирик қолиб кетган GL қаторлари
+		  -- элиминацияни шишириб, таннархни камайтириб юборарди
+		  -- (ACC-SINV-2026-00046-1: 6 305 876 сўм).
+		  AND si.docstatus = 1
 		  AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
 		  AND acc.root_type = 'Income'
 		  AND cust.is_internal_customer = 1
@@ -306,13 +352,14 @@ def fetch_dividends(companies, from_date, to_date):
 def aggregate(period_list, companies, gl_rows, internal_rows, dividend_rows, owner_rows):
 	def empty_company():
 		return {"revenue": 0, "cogs_raw": 0, "cogs_adj": 0, "kassa": 0, "brak": 0,
-				"op": {}, "adm": {}, "other": {}, "owner_salary": 0}
+				"adj": {}, "op": {}, "adm": {}, "other": {}, "owner_salary": 0}
 
 	def empty_period():
 		return {
 			"companies": {c: empty_company() for c in companies},
 			"internal": 0,
 			"dividends": {num: 0 for num in DIVIDEND_ACCOUNTS},
+			"acc_labels": {},   # счёт рақами -> кўринадиган ном
 			"owner_taken": {o["key"]: 0 for o in OWNERS},
 			"owner_salary": {o["key"]: 0 for o in OWNERS},
 		}
@@ -328,30 +375,54 @@ def aggregate(period_list, companies, gl_rows, internal_rows, dividend_rows, own
 			continue
 
 		net = flt(r.debit) - flt(r.credit)
-		key = r.account_name or r.account_number or "?"
+		# Калит РАҚАМ бўйича: бир компанияда бир хил номли иккита счёт бор
+		# (масалан 5201 ва 5281 — иккаласи ҳам "Ish haqqi"), ном бўйича
+		# калитласак улар жимгина битта қаторга қўшилиб кетарди.
+		key = r.account_number or r.account_name or "?"
+		label = r.account_name or r.account_number or "?"
+
+		# Касса фойда-зарар / брак счётими? Текшириш ота-гуруҳдан ОЛДИН
+		# қилинади — изоҳ қуйида, cost_bucket ишлатилган жойда.
+		cost_bucket = _classify_cost_bucket(r.account_number, r.account_name)
 
 		if r.root_type == "Income":
 			cd["revenue"] += flt(r.credit) - flt(r.debit)
 		elif r.account_type == "Cost of Goods Sold":
 			cd["cogs_raw"] += net
 		elif r.account_type == "Stock Adjustment":
-			cd["cogs_adj"] += net
-		elif r.parent_number == OP_GROUP:
-			# Кассa фойда-зарар ва брак 52001 остида турса ҳам, моҳияти
-			# бўйича таннарх — уларни Себестоимость ичига оламиз.
-			bucket = _classify_cost_bucket(r.account_number, r.account_name)
-			if bucket:
-				cd[bucket] += net
+			# Омбор тафовути ҳаммаси битта счётга (5119) тушади, лекин сабаби
+			# ҳар хил: нобуд/списание, инвентаризация, ишлаб чиқариш фарқи.
+			# Ҳужжат турига қараб ажратилади. Алоҳида "Brak" номли Stock Entry
+			# Type очилса — тўғридан-тўғри Брак қаторига тушади.
+			kind = r.get("adj_kind") or "other"
+			if kind in BRAK_ADJ_KINDS:
+				cd["brak"] += net
 			else:
-				cd["op"][key] = cd["op"].get(key, 0) + net
+				cd["cogs_adj"] += net
+				cd["adj"][kind] = cd["adj"].get(kind, 0) + net
+		elif cost_bucket:
+			# Касса фойда-зарар ва брак — моҳияти бўйича таннарх, шунинг учун
+			# Себестоимость ичига олинади.
+			#
+			# Текшириш ота-гуруҳдан ОЛДИН қилинади (аввал фақат 52001 остида
+			# қараларди). Сабаби: "5213 Kassa Farq" ишчи компанияларда 52001
+			# эмас, "5200 Indirect Expenses" остида турибди — эски тартибда у
+			# 5200 шохи билан бирга ташлаб юбориларди ва унга ёзилган ҳар
+			# қандай сумма ҳисоботдан жимгина йўқоларди.
+			cd[cost_bucket] += net
+		elif r.parent_number == OP_GROUP:
+			cd["op"][key] = cd["op"].get(key, 0) + net
+			pdata[pk]["acc_labels"][key] = label
 		elif r.parent_number == ADM_GROUP:
 			cd["adm"][key] = cd["adm"].get(key, 0) + net
+			pdata[pk]["acc_labels"][key] = label
 		elif r.parent_number == INDIRECT_GROUP:
 			# "5200 - Indirect Expenses" ostidagi guruhsiz eski hisoblar —
 			# PL Hisoboti bilan bir xil: hisobotga kiritilmaydi.
 			continue
 		else:
 			cd["other"][key] = cd["other"].get(key, 0) + net
+			pdata[pk]["acc_labels"][key] = label
 
 	for r in internal_rows:
 		pk = _period_key(r.posting_date, period_list)
@@ -459,20 +530,37 @@ def get_columns(period_list):
 
 # ─── Row builder ─────────────────────────────────────────────────────────────
 
-def _co_distributable(cd, add_back=1):
-	"""Тақсимланадиган фойда — эгалар "маоши" харажатдан қайтарилгандан кейин.
+def _co_distributable(cd, add_back=0):
+	"""Компаниянинг соф фойдаси.
 
-	Эгалар олган пул аслида дивиденд аванси; у харажат бўлиб турса, эгалар
-	ўз пули ҳисобига ўз дивиденд базасини камайтирган бўлади."""
+	`add_back` фақат "Тақсимланадиган фойда" сарлавҳа қаторини кўрсатиш учун
+	ишлатилади — ЭГАЛАР УЛУШИНИ ҳисоблашда ЭМАС (изоҳ `_owner_share`да)."""
 	return _co_profit(cd) + (flt(cd.get("owner_salary")) if add_back else 0)
 
 
 def _owner_share(d, owner_key, add_back=1):
-	"""Эганинг шу даврдаги улуши — ҳар компания бўйича ўз коэффициенти билан
-	(Смарт 100% Акмал, қолганлари 50/50; зарар ҳам худди шундай бўлинади)."""
+	"""Эганинг шу даврдаги улуши.
+
+	Формула PL Calculation билан АЙНАН БИР ХИЛ бўлиши шарт — акс ҳолда икки
+	ҳисобот бир хил давр учун эгаларга ҳар хил рақам кўрсатади.
+
+	Тўғри тартиб:
+	    улуш = Σ(компания СОФ фойдаси × коэффициент)  +  ЎЗ ойлиги
+
+	Яъни ойлик аввал харажат сифатида фойдадан айирилган (иккала шерик
+	50/50 кўтарган), кейин эса тўлиқ ҳолда ЎЗ эгасининг ҳисобига
+	қайтарилади — чунки у ўша эганинг шахсий ҳақи.
+
+	Аввал бу ерда бошқача ёзилган эди: ойлик компания фойдасига қайтариб
+	қўшилиб, кейин 50/50 бўлинарди. Ойликлар тенг бўлмагани учун
+	(Акмал 42 млн/ой, Элёр 18 млн/ой) бу PL Calculation'дан ҳар бир эга
+	бўйича ойига 12 млн фарқ берарди — жами эса бир хил чиқиб, ҳеч қандай
+	назорат уни ушламасди."""
 	total = 0
 	for company, cd in d["companies"].items():
-		total += _co_distributable(cd, add_back) * get_shares(company).get(owner_key, 0)
+		total += _co_profit(cd) * get_shares(company).get(owner_key, 0)
+	if add_back:
+		total += flt(d["owner_salary"].get(owner_key, 0))
 	return total
 
 
@@ -526,13 +614,24 @@ def build_rows(period_list, companies, pdata, eliminate=1, add_back=1):
 		("cogs_raw", "Сырьевая себестоимость"),
 		("cogs_adj", "Убыток от себестоимости"),
 		("kassa", "Foyda/Zarar Kassa"),
-		("brak", "Brak"),
+		("brak", "Брак (нобуд товар)"),
 	]:
 		bvm = per_period(lambda d, b=bucket: sum(
 			flt(cd[b]) for cd in d["companies"].values()))
 		if all_zero(bvm):
 			continue
 		rows.append(mk(bucket_label, bvm, "sub", 1, is_cost=True))
+
+		# "Убыток от себестоимости" ичида — сабаб бўйича ажратма. Ҳаммаси
+		# битта счётга (5119) тушгани учун фақат ҳужжат туридан билинади.
+		if bucket == "cogs_adj":
+			for kind, kind_label in ADJ_KIND_LABELS:
+				kvm = per_period(lambda d, k=kind: sum(
+					flt(cd["adj"].get(k, 0)) for cd in d["companies"].values()))
+				if all_zero(kvm):
+					continue
+				rows.append(mk(kind_label, kvm, "detail", 2, is_cost=True))
+
 		for co in companies:
 			cvm = per_period(lambda d, b=bucket, c=co: flt(d["companies"][c][b]))
 			if all_zero(cvm):
@@ -688,6 +787,11 @@ def _account_rows(period_list, pdata, bucket, companies):
 			for acc, amt in cd[bucket].items():
 				totals[acc] = totals.get(acc, 0) + flt(amt)
 
+	# Рақам -> ном (счёт рақами калит, лекин экранда ном кўринади)
+	labels = {}
+	for p in period_list:
+		labels.update(pdata[p["key"]].get("acc_labels") or {})
+
 	result = []
 	for acc in sorted(totals, key=lambda a: -abs(totals[a])):
 		if not flt(totals[acc]):
@@ -700,5 +804,5 @@ def _account_rows(period_list, pdata, bucket, companies):
 				if cd:
 					total += flt(cd[bucket].get(acc, 0))
 			vm[_fk(p["key"])] = total
-		result.append((acc, vm))
+		result.append((labels.get(acc, acc), vm))
 	return result

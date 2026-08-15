@@ -27,6 +27,7 @@ yaxshilansa uchalasiga ham tegadi.
 import json
 
 import frappe
+from frappe import _
 from frappe.utils import flt
 from weasyprint import HTML
 
@@ -253,8 +254,28 @@ def meta_from_filters(filters, extra_keys=None):
 	return lines
 
 
-def send(filters, execute_fn, title, subtitle, filename_prefix, extra_meta_keys=None):
+def check_report_permission(report_name):
+	"""PDF endpoint'и ҳисоботнинг ЎЗИ билан бир хил ҳуқуқни талаб қилсин.
+
+	`@frappe.whitelist()` ўзи фақат "тизимга кирганми" деб текширади. Ҳисобот
+	эса Report doctype орқали Accounts Manager / Accounts User / System Manager
+	билан чегараланган. Шу текширувсиз ҳар қандай фойдаланувчи (масалан омбор
+	ходими) PDF орқали бутун гуруҳнинг фойда-зарарини, эгаларнинг олган пули
+	ва дивидендигача кўра оларди."""
+	if not frappe.db.exists("Report", report_name):
+		frappe.throw(_("Ҳисобот топилмади: {0}").format(report_name))
+	if not frappe.get_doc("Report", report_name).is_permitted():
+		raise frappe.PermissionError(
+			_("Сизда «{0}» ҳисоботини кўриш ҳуқуқи йўқ").format(report_name))
+	frappe.has_permission("Report", "read", doc=report_name, throw=True)
+
+
+def send(filters, execute_fn, title, subtitle, filename_prefix, extra_meta_keys=None,
+		 report_name=None):
 	"""Ҳисоботни PDF қилиб браузерга юборади (серверда сақланмайди)."""
+	if report_name:
+		check_report_permission(report_name)
+
 	if isinstance(filters, str):
 		filters = json.loads(filters)
 	filters = frappe._dict(filters or {})

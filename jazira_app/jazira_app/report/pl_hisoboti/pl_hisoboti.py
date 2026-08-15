@@ -134,6 +134,10 @@ def fetch_gl(company, from_date, to_date):
 		WHERE gle.company = %s
 		  AND gle.is_cancelled = 0
 		  AND gle.posting_date BETWEEN %s AND %s
+		  -- Йил ёпилганда Period Closing Voucher бутун йиллик натижани
+		  -- тескари ёзади; чиқарилмаса ҳисобот нолга тушиб қоларди
+		  -- (PL Obshi ва Expense Allocation'да бу аллақачон бор эди).
+		  AND gle.voucher_type != 'Period Closing Voucher'
 		  AND acc.root_type IN ('Income', 'Expense')
 		GROUP BY gle.posting_date, gle.account
 		ORDER BY gle.posting_date

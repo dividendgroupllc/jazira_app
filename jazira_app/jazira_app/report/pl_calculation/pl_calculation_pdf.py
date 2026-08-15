@@ -26,4 +26,4 @@ def build_html(filters):
 @frappe.whitelist()
 def generate_pl_calculation_pdf(filters):
 	pl_pdf.send(filters, execute, "Jazira Group · PL Calculation",
-				"Отчёт для расчёта общий", "PL_Calculation", ["section"])
+				"Отчёт для расчёта общий", "PL_Calculation", ["section"], report_name="PL Calculation")

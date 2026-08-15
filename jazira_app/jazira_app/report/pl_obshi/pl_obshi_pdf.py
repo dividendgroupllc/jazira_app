@@ -27,4 +27,4 @@ def build_html(filters):
 @frappe.whitelist()
 def generate_pl_obshi_pdf(filters):
 	pl_pdf.send(filters, execute, "Jazira Group · Консолидация",
-				"Умумий фойда — зарар ҳисоботи", "PL_Obshi")
+				"Умумий фойда — зарар ҳисоботи", "PL_Obshi", report_name="PL Obshi")
