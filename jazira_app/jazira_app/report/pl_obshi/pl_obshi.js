@@ -60,12 +60,6 @@ frappe.query_reports["PL Obshi"] = {
 			"reqd": 1
 		},
 		{
-			"fieldname": "add_back_owner_salary",
-			"label": __("Эгалар маошини фойдага қайтариб қўшиш"),
-			"fieldtype": "Check",
-			"default": 1
-		},
-		{
 			"fieldname": "eliminate_internal",
 			"label": __("Ички айланмани чиқариб ташлаш"),
 			"fieldtype": "Check",

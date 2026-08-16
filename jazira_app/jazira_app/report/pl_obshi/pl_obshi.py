@@ -180,9 +180,6 @@ def execute(filters=None):
 	eliminate = filters.get("eliminate_internal")
 	eliminate = 1 if eliminate in (None, "") else int(eliminate)
 
-	add_back = filters.get("add_back_owner_salary")
-	add_back = 1 if add_back in (None, "") else int(add_back)
-
 	gl_rows = fetch_gl(companies, from_date, to_date)
 	internal_rows = fetch_internal_sales(companies, from_date, to_date) if eliminate else []
 	dividend_rows = fetch_dividends(companies, from_date, to_date)
@@ -191,7 +188,7 @@ def execute(filters=None):
 	pdata = aggregate(period_list, companies, gl_rows, internal_rows, dividend_rows, owner_rows)
 
 	columns = get_columns(period_list)
-	data = build_rows(period_list, companies, pdata, eliminate, add_back)
+	data = build_rows(period_list, companies, pdata, eliminate)
 
 	return columns, data
 
@@ -240,6 +237,8 @@ def fetch_gl(companies, from_date, to_date):
 				WHEN se.purpose = 'Manufacture' THEN 'mfg'
 				ELSE 'other'
 			END AS adj_kind,
+			CASE WHEN IFNULL(alloc_je.custom_jazira_expense_allocation, '') != ''
+				THEN 1 ELSE 0 END AS is_allocation,
 			SUM(gle.debit) AS debit,
 			SUM(gle.credit) AS credit
 		FROM `tabGL Entry` gle
@@ -247,12 +246,14 @@ def fetch_gl(companies, from_date, to_date):
 		LEFT JOIN `tabAccount` parent_acc ON parent_acc.name = acc.parent_account
 		LEFT JOIN `tabStock Entry` se
 			ON se.name = gle.voucher_no AND gle.voucher_type = 'Stock Entry'
+		LEFT JOIN `tabJournal Entry` alloc_je
+			ON alloc_je.name = gle.voucher_no AND gle.voucher_type = 'Journal Entry'
 		WHERE gle.company IN %(companies)s
 		  AND gle.is_cancelled = 0
 		  AND gle.posting_date BETWEEN %(from_date)s AND %(to_date)s
 		  AND gle.voucher_type != 'Period Closing Voucher'
 		  AND acc.root_type IN ('Income', 'Expense')
-		GROUP BY gle.company, gle.posting_date, gle.account, adj_kind
+		GROUP BY gle.company, gle.posting_date, gle.account, adj_kind, is_allocation
 		""",
 		{"companies": tuple(companies), "from_date": from_date, "to_date": to_date},
 		as_dict=True,
@@ -360,6 +361,11 @@ def aggregate(period_list, companies, gl_rows, internal_rows, dividend_rows, own
 			"internal": 0,
 			"dividends": {num: 0 for num in DIVIDEND_ACCOUNTS},
 			"acc_labels": {},   # счёт рақами -> кўринадиган ном
+			# Ма'мурий харажат ТАҚСИМЛАШДАН ОЛДИНГИ ҳолати: Jazira Expense
+			# Allocation яратган JE'лар (тескари ёзув + филиалларга қайта
+			# ёзиш) чиқарилса, харажат қаерда бўлса ўша ерда — яъни
+			# дастлабки ҳолида қолади. Жами ўзгармайди, фақат тақсимот йўқ.
+			"adm_raw": {},
 			"owner_taken": {o["key"]: 0 for o in OWNERS},
 			"owner_salary": {o["key"]: 0 for o in OWNERS},
 		}
@@ -416,6 +422,9 @@ def aggregate(period_list, companies, gl_rows, internal_rows, dividend_rows, own
 		elif r.parent_number == ADM_GROUP:
 			cd["adm"][key] = cd["adm"].get(key, 0) + net
 			pdata[pk]["acc_labels"][key] = label
+			if not r.get("is_allocation"):
+				d_raw = pdata[pk]["adm_raw"]
+				d_raw[key] = d_raw.get(key, 0) + net
 		elif r.parent_number == INDIRECT_GROUP:
 			# "5200 - Indirect Expenses" ostidagi guruhsiz eski hisoblar —
 			# PL Hisoboti bilan bir xil: hisobotga kiritilmaydi.
@@ -530,41 +539,7 @@ def get_columns(period_list):
 
 # ─── Row builder ─────────────────────────────────────────────────────────────
 
-def _co_distributable(cd, add_back=0):
-	"""Компаниянинг соф фойдаси.
-
-	`add_back` фақат "Тақсимланадиган фойда" сарлавҳа қаторини кўрсатиш учун
-	ишлатилади — ЭГАЛАР УЛУШИНИ ҳисоблашда ЭМАС (изоҳ `_owner_share`да)."""
-	return _co_profit(cd) + (flt(cd.get("owner_salary")) if add_back else 0)
-
-
-def _owner_share(d, owner_key, add_back=1):
-	"""Эганинг шу даврдаги улуши.
-
-	Формула PL Calculation билан АЙНАН БИР ХИЛ бўлиши шарт — акс ҳолда икки
-	ҳисобот бир хил давр учун эгаларга ҳар хил рақам кўрсатади.
-
-	Тўғри тартиб:
-	    улуш = Σ(компания СОФ фойдаси × коэффициент)  +  ЎЗ ойлиги
-
-	Яъни ойлик аввал харажат сифатида фойдадан айирилган (иккала шерик
-	50/50 кўтарган), кейин эса тўлиқ ҳолда ЎЗ эгасининг ҳисобига
-	қайтарилади — чунки у ўша эганинг шахсий ҳақи.
-
-	Аввал бу ерда бошқача ёзилган эди: ойлик компания фойдасига қайтариб
-	қўшилиб, кейин 50/50 бўлинарди. Ойликлар тенг бўлмагани учун
-	(Акмал 42 млн/ой, Элёр 18 млн/ой) бу PL Calculation'дан ҳар бир эга
-	бўйича ойига 12 млн фарқ берарди — жами эса бир хил чиқиб, ҳеч қандай
-	назорат уни ушламасди."""
-	total = 0
-	for company, cd in d["companies"].items():
-		total += _co_profit(cd) * get_shares(company).get(owner_key, 0)
-	if add_back:
-		total += flt(d["owner_salary"].get(owner_key, 0))
-	return total
-
-
-def build_rows(period_list, companies, pdata, eliminate=1, add_back=1):
+def build_rows(period_list, companies, pdata, eliminate=1):
 	fkeys = [_fk(p["key"]) for p in period_list]
 
 	def per_period(fn):
@@ -711,73 +686,34 @@ def build_rows(period_list, companies, pdata, eliminate=1, add_back=1):
 			continue
 		rows.append(mk(f"Операционный прибыль {company_label(co)}", vm, "detail", 1))
 
-	# ── ЭГАЛАР КЕСИМИДА ФОЙДА ТАҚСИМОТИ ──────────────────────────────────────
+	# ── АДМ РАСХОД (ТАҚСИМЛАШДАН ОЛДИНГИ ҲОЛАТ) ──────────────────────────────
+	#
+	# Юқоридаги "Операционные расходы Административ" — Jazira Expense
+	# Allocation филиалларга ТАРҚАТГАНДАН КЕЙИНГИ ҳолат (Склад 23.7 млн,
+	# Сарипул 91.3 млн, Халк Банки 57.3 млн). Бу ерда эса ўша харажат
+	# ДАСТЛАБКИ ҳолида — қаерда юзага келган бўлса ўша ерда, счётма-счёт.
+	# Жами иккалада ҳам бир хил (2026-июнь: 172 375 784).
 	rows.append(divider())
+	raw_total = per_period(lambda d: sum(
+		flt(v) for v in d["adm_raw"].values()))
+	if not all_zero(raw_total):
+		rows.append(mk("Адм расход (тақсимлашдан олдин)", raw_total, "root", 0, is_cost=True))
 
-	dist_vm = per_period(lambda d: sum(
-		_co_distributable(cd, add_back) for cd in d["companies"].values()))
-	rows.append(mk("Тақсимланадиган фойда", dist_vm, "root", 0))
-	if add_back:
-		salary_vm = per_period(lambda d: sum(d["owner_salary"].values()))
-		if not all_zero(salary_vm):
-			rows.append(mk("Операцион фойда", per_period(_total_profit), "detail", 1))
-			rows.append(mk("(+) Эгалар маоши (аслида дивиденд аванси)", salary_vm, "detail", 1))
+		# Счётлар — умумий суммаси бўйича каттадан кичикка
+		totals = {}
+		for p in period_list:
+			for acc, amt in pdata[p["key"]]["adm_raw"].items():
+				totals[acc] = totals.get(acc, 0) + flt(amt)
+		labels = {}
+		for p in period_list:
+			labels.update(pdata[p["key"]].get("acc_labels") or {})
 
-	for owner in OWNERS:
-		vm = per_period(lambda d, k=owner["key"]: _owner_share(d, k, add_back))
-		if all_zero(vm):
-			continue
-		rows.append(mk(f"{owner['label']} улуши", vm, "sub", 1))
-		# Ичкаридаги қаторлар отасига АНИҚ қўшилиши шарт. Шунинг учун улар ҳам
-		# компаниянинг СОФ фойдасидан ҳисобланади (аввал бу ерда фойдага
-		# эгалар ойлиги қўшилган ҳолат ишлатилган эди — шунда Склад зарарда
-		# турса ҳам унинг улуши мусбат чиқиб, чалкаш кўринарди), эганинг ўз
-		# ойлиги эса алоҳида қатор бўлиб қўшилади.
-		for co in companies:
-			pct = get_shares(co).get(owner["key"], 0)
-			if not pct:
+		for acc in sorted(totals, key=lambda a: -abs(totals[a])):
+			if not flt(totals[acc]):
 				continue
-			cvm = per_period(lambda d, c=co, p=pct: _co_profit(d["companies"][c]) * p)
-			if all_zero(cvm):
-				continue
-			rows.append(mk(f"{company_label(co)} ({pct * 100:.0f}%)", cvm, "detail", 2))
-		if add_back:
-			svm = per_period(lambda d, k=owner["key"]: flt(d["owner_salary"].get(k, 0)))
-			if not all_zero(svm):
-				rows.append(mk("(+) ўз ойлиги", svm, "detail", 2))
+			avm = per_period(lambda d, a=acc: flt(d["adm_raw"].get(a, 0)))
+			rows.append(mk(labels.get(acc, acc), avm, "detail", 1, is_cost=True))
 
-	# ── ЭГАЛАР ОЛГАНИ ────────────────────────────────────────────────────────
-	taken_vm = per_period(lambda d: sum(d["owner_taken"].values())
-						  + sum(d["dividends"].values()))
-	if not all_zero(taken_vm):
-		rows.append(mk("Эгалар олгани (аванс + дивиденд)", taken_vm, "root", 0, is_cost=True))
-		for owner in OWNERS:
-			own_vm = per_period(lambda d, k=owner["key"], a=owner["account"]:
-								d["owner_taken"].get(k, 0) + d["dividends"].get(a, 0))
-			if all_zero(own_vm):
-				continue
-			rows.append(mk(f"{owner['label']} олгани", own_vm, "sub", 1, is_cost=True))
-			adv_vm = per_period(lambda d, k=owner["key"]: d["owner_taken"].get(k, 0))
-			if not all_zero(adv_vm):
-				rows.append(mk("аванс (Employee сифатида, наqд)", adv_vm, "detail", 2, is_cost=True))
-			div_vm = per_period(lambda d, a=owner["account"]: d["dividends"].get(a, 0))
-			if not all_zero(div_vm):
-				rows.append(mk(f"дивиденд ({owner['account']} счёт)", div_vm, "detail", 2, is_cost=True))
-
-	# ── ҚОЛДИҚ ───────────────────────────────────────────────────────────────
-	def _balance(d, key, account):
-		return (_owner_share(d, key, add_back)
-				- d["owner_taken"].get(key, 0) - d["dividends"].get(account, 0))
-
-	bal_vm = per_period(lambda d: sum(
-		_balance(d, o["key"], o["account"]) for o in OWNERS))
-	if not all_zero(bal_vm):
-		rows.append(mk("Қолдиқ (улуш − олингани)", bal_vm, "result", 0))
-		for owner in OWNERS:
-			vm = per_period(lambda d, o=owner: _balance(d, o["key"], o["account"]))
-			if all_zero(vm):
-				continue
-			rows.append(mk(owner["label"], vm, "detail", 1))
 
 	return rows
 

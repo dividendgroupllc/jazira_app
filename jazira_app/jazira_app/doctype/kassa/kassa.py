@@ -428,17 +428,14 @@ class Kassa(Document):
                 )
             )
 
-        # Har bir companyni ifodalovchi Customer
-        cust_target = self._get_intercompany_customer(target_company)  # Smart
-        cust_payer = self._get_intercompany_customer(self.company)     # Saripul
-        if not cust_target:
-            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(target_company))
-        if not cust_payer:
-            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(self.company))
+        # Ҳар тараф ЎЗ китобидаги савдо йўналишига мос контрагент турини олади
+        # (изоҳ: _intercompany_party).
+        payer_pt, payer_party = self._intercompany_party(target_company, self.company)
+        target_pt, target_party = self._intercompany_party(self.company, target_company)
 
         from erpnext.accounts.party import get_party_account
-        payer_recv = get_party_account("Customer", cust_target, self.company)
-        target_recv = get_party_account("Customer", cust_payer, target_company)
+        payer_recv = get_party_account(payer_pt, payer_party, self.company)
+        target_recv = get_party_account(target_pt, target_party, target_company)
 
         is_expense = self.oborot == "Расход"
 
@@ -446,25 +443,25 @@ class Kassa(Document):
             # Расход: payer Pay, target Receive, JE Дт xarajat / Кт kassa
             pe_pay = self._submit_payment_entry(
                 payment_type="Pay", company=self.company,
-                mode_of_payment=self.source_account, party_type="Customer",
-                party=cust_target, paid_from=self.payment_account, paid_to=payer_recv,
+                mode_of_payment=self.source_account, party_type=payer_pt,
+                party=payer_party, paid_from=self.payment_account, paid_to=payer_recv,
             )
             pe_recv = self._submit_payment_entry(
                 payment_type="Receive", company=target_company,
-                mode_of_payment=filial.mode_of_payment, party_type="Customer",
-                party=cust_payer, paid_from=target_recv, paid_to=target_cash,
+                mode_of_payment=filial.mode_of_payment, party_type=target_pt,
+                party=target_party, paid_from=target_recv, paid_to=target_cash,
             )
         else:
             # Приход: teskari — payer Receive, target Pay, JE Дт kassa / Кт xarajat
             pe_pay = self._submit_payment_entry(
                 payment_type="Receive", company=self.company,
-                mode_of_payment=self.source_account, party_type="Customer",
-                party=cust_target, paid_from=payer_recv, paid_to=self.payment_account,
+                mode_of_payment=self.source_account, party_type=payer_pt,
+                party=payer_party, paid_from=payer_recv, paid_to=self.payment_account,
             )
             pe_recv = self._submit_payment_entry(
                 payment_type="Pay", company=target_company,
-                mode_of_payment=filial.mode_of_payment, party_type="Customer",
-                party=cust_payer, paid_from=target_cash, paid_to=target_recv,
+                mode_of_payment=filial.mode_of_payment, party_type=target_pt,
+                party=target_party, paid_from=target_cash, paid_to=target_recv,
             )
 
         # 3) JE (xarajat) - filial kitobida. Xarajat hisobi allaqachon filial
@@ -533,28 +530,25 @@ class Kassa(Document):
                 _("'{0}' kompaniyasida Default Cash Account sozlanmagan").format(sklad_company)
             )
 
-        cust_sklad = self._get_intercompany_customer(sklad_company)   # filial kitobida Sklad
-        cust_payer = self._get_intercompany_customer(self.company)    # Sklad kitobida filial
-        if not cust_sklad:
-            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(sklad_company))
-        if not cust_payer:
-            frappe.throw(_("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(self.company))
+        # Филиал китобида Склад -> Supplier, Склад китобида филиал -> Customer
+        filial_pt, filial_party = self._intercompany_party(sklad_company, self.company)
+        sklad_pt, sklad_party = self._intercompany_party(self.company, sklad_company)
 
         from erpnext.accounts.party import get_party_account
-        filial_recv = get_party_account("Customer", cust_sklad, self.company)
-        sklad_recv = get_party_account("Customer", cust_payer, sklad_company)
+        filial_recv = get_party_account(filial_pt, filial_party, self.company)
+        sklad_recv = get_party_account(sklad_pt, sklad_party, sklad_company)
 
         # 1) Filial -> Sklad
         pe_pay = self._submit_payment_entry(
             payment_type="Pay", company=self.company,
-            mode_of_payment=self.source_account, party_type="Customer",
-            party=cust_sklad, paid_from=self.payment_account, paid_to=filial_recv,
+            mode_of_payment=self.source_account, party_type=filial_pt,
+            party=filial_party, paid_from=self.payment_account, paid_to=filial_recv,
         )
         # 2) Sklad qabul qiladi
         pe_recv = self._submit_payment_entry(
             payment_type="Receive", company=sklad_company,
-            mode_of_payment=None, party_type="Customer",
-            party=cust_payer, paid_from=sklad_recv, paid_to=sklad_cash,
+            mode_of_payment=None, party_type=sklad_pt,
+            party=sklad_party, paid_from=sklad_recv, paid_to=sklad_cash,
         )
 
         # 3) Sklad -> Supplier (supplier = Sklad o'zi bo'lmasa)
@@ -719,6 +713,45 @@ class Kassa(Document):
     def _get_intercompany_supplier(self, company):
         """Berilgan companyni ifodalovchi Supplier (represents_company)."""
         return frappe.db.get_value("Supplier", {"represents_company": company}, "name")
+
+    def _intercompany_party(self, counterparty_company, our_company):
+        """Қарши компания БИЗНИНГ китобимизда қайси тарафда туриши.
+
+        Савдо йўналиши бўйича аниқланади — Склад филиалларга товар сотади:
+          · Склад китобида филиал  -> Customer  (филиал бизга қарздор)
+          · филиал китобида Склад  -> Supplier  (биз Складга қарздормиз)
+          · филиал <-> филиал      -> Customer  (ўзаро савдо алоқаси йўқ)
+
+        НЕГА КЕРАК. Аввал ҳар икки тарафда ҳам Customer ишлатиларди. Шунда
+        айни бир контрагент (Склад) филиал китобида ҳам 1310 Debtors'да, ҳам
+        2110 Creditors'да ўтирарди ва қарзлар ҳеч қачон ўзаро ёпилмасди:
+
+            Сарипул    1310 [Customer Склад]  +1 556 265 295
+                       2110 [Supplier Склад]  −1 151 749 537
+            Халк Банки 1310 [Customer Склад]  +1 070 038 266
+                       2110 [Supplier Склад]    −804 742 546
+
+        Филиал Складнинг харажатини ўз кассасидан тўласа, бу Складга бўлган
+        ҚАРЗНИ КАМАЙТИРИШИ керак (Дт 2110), янги дебиторлик яратмаслиги.
+
+        Қайтаради: (party_type, party). Топилмаса throw қилади.
+        """
+        sklad = self._get_sklad_company()
+
+        # Биз филиалмиз, қарши тараф Склад -> у бизнинг таъминотчимиз
+        if sklad and counterparty_company == sklad and our_company != sklad:
+            supplier = self._get_intercompany_supplier(counterparty_company)
+            if supplier:
+                return "Supplier", supplier
+
+        customer = self._get_intercompany_customer(counterparty_company)
+        if not customer:
+            frappe.throw(
+                _("'{0}' kompaniyasini ifodalovchi Customer topilmadi").format(
+                    counterparty_company
+                )
+            )
+        return "Customer", customer
 
     # -------------------------------------------------------------------------
     # SKLAD <-> FILIAL (oddiy mijoz orqali) — supplier-via-sklad'ning teskarisi
