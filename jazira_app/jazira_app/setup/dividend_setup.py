@@ -30,8 +30,8 @@ def create_dividend_party_types():
 			doc.flags.ignore_links = True
 			doc.insert(ignore_permissions=True)
 			print(f"✅ Party Type yaratildi: {pt}")
-		else:
-			print(f"⏭️  Party Type allaqachon bor: {pt}")
+		# Аллақачон бор бўлса — ҳеч нима ёзилмайди. Бу функция ҳар migrate'да
+		# хавфсизлик учун ишлайди, лекин ўзгариш бўлмаса жим туриши керак.
 
 
 def rename_dividend_accounts():

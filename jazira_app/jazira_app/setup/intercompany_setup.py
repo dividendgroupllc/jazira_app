@@ -22,6 +22,11 @@ def ensure_customer_filial_field():
 	"""
 	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+	# Аввал текширамиз: майдон йўқ бўлсагина хабар берамиз. Ҳар migrate'да
+	# "тайёр" деб ёзавериш логни бекорга тўлдиради.
+	existed = frappe.db.exists(
+		"Custom Field", {"dt": "Customer", "fieldname": "jazira_filial_company"})
+
 	create_custom_fields({
 		"Customer": [{
 			"fieldname": "jazira_filial_company",
@@ -35,7 +40,8 @@ def ensure_customer_filial_field():
 			),
 		}]
 	})
-	print("✅ Customer.jazira_filial_company maydoni tayyor")
+	if not existed:
+		print("✅ Customer.jazira_filial_company maydoni yaratildi")
 
 
 def ensure_intercompany_customers():

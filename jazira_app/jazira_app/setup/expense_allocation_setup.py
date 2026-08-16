@@ -47,7 +47,7 @@ def ensure_allocation_account(company):
 		"name",
 	)
 	if existing:
-		print(f"⏭️  {company}: allaqachon bor — {existing}")
+		# Аллақачон бор — жим қайтамиз (ҳар migrate'да такрорланмасин).
 		return existing
 
 	account = frappe.get_doc(
@@ -78,6 +78,10 @@ def ensure_payment_entry_link_field():
 	"""
 	from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
+	existed = frappe.db.exists(
+		"Custom Field",
+		{"dt": "Payment Entry", "fieldname": "custom_jazira_expense_allocation"})
+
 	create_custom_fields({
 		"Payment Entry": [{
 			"fieldname": "custom_jazira_expense_allocation",
@@ -92,7 +96,8 @@ def ensure_payment_entry_link_field():
 			"description": "Jazira Expense Allocation orqali yaratilgan to'lovni belgilaydi",
 		}]
 	})
-	print("✅ Payment Entry.custom_jazira_expense_allocation maydoni tayyor")
+	if not existed:
+		print("✅ Payment Entry.custom_jazira_expense_allocation maydoni yaratildi")
 
 
 def get_root_company():
@@ -116,8 +121,18 @@ def run():
 		ensure_allocation_account(root)
 
 	companies = frappe.get_all("Company", filters={"is_group": 0}, pluck="name", order_by="name")
+	created = 0
 	for company in companies:
+		before = frappe.db.exists(
+			"Account",
+			{"company": company, "account_name": ALLOCATION_ACCOUNT_NAME},
+		)
 		ensure_allocation_account(company)
+		if not before:
+			created += 1
 
 	frappe.db.commit()
-	print(f"\nTayyor — {len(companies)} ta ishchi kompaniya ko'rib chiqildi.")
+	# Хулоса фақат ҳақиқатан янги ҳисоб очилганда ёзилади.
+	if created:
+		print(f"Тайёр — {created} та компанияда ҳисоб очилди "
+			  f"({len(companies)} та кўриб чиқилди).")
