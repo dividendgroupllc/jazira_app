@@ -238,6 +238,9 @@ def fetch_gl(companies, from_date, to_date):
 				ELSE 'other'
 			END AS adj_kind,
 			CASE WHEN IFNULL(alloc_je.custom_jazira_expense_allocation, '') != ''
+				  -- Zaxira: custom ustun hali migrate bo'lmagan muhitda ham
+				  -- taqsimot JE'lari izoh prefiksi orqali tanilsin
+				  OR IFNULL(alloc_je.user_remark, '') LIKE 'Jazira Expense Allocation:%%'
 				THEN 1 ELSE 0 END AS is_allocation,
 			SUM(gle.debit) AS debit,
 			SUM(gle.credit) AS credit

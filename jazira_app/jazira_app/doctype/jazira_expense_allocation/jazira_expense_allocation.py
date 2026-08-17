@@ -55,17 +55,25 @@ class JaziraExpenseAllocation(Document):
         self.validate_submit_ready()
 
     def on_submit(self):
+        # Yangi mexanizm (egalar talabi bilan qayta ishlangan):
+        #   JE-1 (Sklad):  Дт Tranzit kassa (jami filial ulushi)
+        #                  Кт asl ma'muriy hisoblar (ulush nisbatida)
+        #   JE-2 (Sklad):  Дт 1310 Debtors [Customer: filial] (har biri o'z ulushi)
+        #                  Кт Tranzit kassa (jami)
+        #   JE-3 (filial): Дт filialning MOS ma'muriy hisoblari (hovuz tarkibida)
+        #                  Кт 2110 Creditors [Supplier: Sklad]
+        # Qarz keyin filialning odatiy Kassa to'lovlari bilan yopiladi —
+        # avtomatik взаимозачёт YARATILMAYDI.
         created = []
         created.extend(self.create_expense_reversal_journal_entries())
         created.extend(self.create_allocation_journal_entries())
-        nettings = self.create_netting_journal_entries()
         self.db_set("status", "Submitted")
 
         if created:
-            msg = _("Xarajat taqsimoti uchun {0} ta Journal Entry yaratildi").format(len(created))
-            if nettings:
-                msg += _(" va {0} ta взаимозачёт (qarz yopish) yozuvi").format(len(nettings))
-            frappe.msgprint(msg, indicator="green")
+            frappe.msgprint(
+                _("Xarajat taqsimoti uchun {0} ta Journal Entry yaratildi").format(len(created)),
+                indicator="green",
+            )
 
     def on_cancel(self):
         # Tartib muhim: взаимозачёт/to'lovlar allocation JE'larga ilingan,
@@ -142,6 +150,12 @@ class JaziraExpenseAllocation(Document):
 
         if not self.source_offset_account:
             self.source_offset_account = self.get_default_source_offset_account(
+                self.expense_source_company
+            )
+
+        # Tranzit kassa (Shaxboz naqd) — JE-1/JE-2 shu orqali o'tadi
+        if not self.get("source_cash_account"):
+            self.source_cash_account = get_default_source_cash_account(
                 self.expense_source_company
             )
 
@@ -246,17 +260,15 @@ class JaziraExpenseAllocation(Document):
             self.append(
                 "expenses",
                 {
-                    "journal_entry": expense.journal_entry,
-                    "posting_date": expense.posting_date,
                     "company": expense.company,
                     "account": expense.account,
                     "account_name": expense.account_name,
-                    "cost_center": expense.cost_center,
-                    "debit": expense.debit,
-                    "credit": expense.credit,
-                    "net_amount": expense.net_amount,
-                    "user_remark": expense.user_remark,
-                    "journal_entry_detail": expense.journal_entry_detail,
+                    "debit": flt(expense.debit, 2),
+                    "credit": flt(expense.credit, 2),
+                    "net_amount": flt(expense.net_amount, 2),
+                    # Qator endi hisob bo'yicha JAMI — qaysi hujjatlardan
+                    # yig'ilgani soni izohda turadi.
+                    "user_remark": _("{0} ta Journal Entry jami").format(expense.doc_count),
                 },
             )
 
@@ -502,20 +514,20 @@ class JaziraExpenseAllocation(Document):
         params["expense_companies"] = tuple(companies)
         params["admin_groups"] = tuple(admin_groups)
 
+        # Har bir HISOB bo'yicha JAMLANGAN summa qaytariladi (egalar talabi:
+        # jadvalda "Obed-Ujen — 18 000, 466 000, 150 000..." emas, bitta qator
+        # "Obed-Ujen — jami" ko'rinishi kerak). Nechta hujjatdan yig'ilgani
+        # doc_count'da saqlanadi va izohda ko'rsatiladi.
         return frappe.db.sql(
             f"""
             SELECT
-                je.name AS journal_entry,
-                je.posting_date,
                 je.company,
-                jea.name AS journal_entry_detail,
                 jea.account,
                 acc.account_name,
-                jea.cost_center,
-                COALESCE(jea.debit, 0) AS debit,
-                COALESCE(jea.credit, 0) AS credit,
-                COALESCE(jea.debit, 0) - COALESCE(jea.credit, 0) AS net_amount,
-                je.user_remark
+                COUNT(DISTINCT je.name) AS doc_count,
+                SUM(COALESCE(jea.debit, 0)) AS debit,
+                SUM(COALESCE(jea.credit, 0)) AS credit,
+                SUM(COALESCE(jea.debit, 0) - COALESCE(jea.credit, 0)) AS net_amount
             FROM `tabJournal Entry` je
             INNER JOIN `tabJournal Entry Account` jea ON jea.parent = je.name
             INNER JOIN `tabAccount` acc ON acc.name = jea.account
@@ -524,9 +536,10 @@ class JaziraExpenseAllocation(Document):
                 AND je.posting_date BETWEEN %(from_date)s AND %(to_date)s
                 AND acc.root_type = 'Expense'
                 AND acc.parent_account IN %(admin_groups)s
-                AND ABS(COALESCE(jea.debit, 0) - COALESCE(jea.credit, 0)) > 0.005
                 AND {allocation_filter}
-            ORDER BY je.posting_date, je.name, jea.idx
+            GROUP BY je.company, jea.account, acc.account_name
+            HAVING ABS(SUM(COALESCE(jea.debit, 0) - COALESCE(jea.credit, 0))) > 0.005
+            ORDER BY net_amount DESC
             """,
             params,
             as_dict=True,
@@ -642,6 +655,22 @@ class JaziraExpenseAllocation(Document):
                 self.source_offset_account,
                 self.expense_source_company,
                 _("Manba clearing account"),
+            )
+
+            # Tranzit kassa — naqd (Cash/Bank) hisob bo'lishi shart
+            if not self.get("source_cash_account"):
+                frappe.throw(_("Tranzit kassa hisobi to'ldirilmagan"))
+            if get_account_type(self.source_cash_account) not in ("Cash", "Bank"):
+                frappe.throw(
+                    _(
+                        "'{0}' — naqd (Cash) hisobi emas. Tranzit uchun kassa hisobi "
+                        "kerak (masalan '1110 - Нахт')."
+                    ).format(self.source_cash_account)
+                )
+            self.validate_account(
+                self.source_cash_account,
+                self.expense_source_company,
+                _("Tranzit kassa"),
             )
 
         missing = []
@@ -844,33 +873,63 @@ class JaziraExpenseAllocation(Document):
             )
 
     def create_expense_reversal_journal_entries(self):
+        """Sklad tomonidagi ikkita JE — egalar chizgan sxema bo'yicha.
+
+        JE-1 "xarajatlarni kassaga yopish":
+            Дт Tranzit kassa (Shaxboz naqd)      — jami filial ulushi
+            Кт asl ma'muriy hisoblar             — ulush nisbatida sochilgan
+        JE-2 "kassadan filial qarziga":
+            Дт 1310 Debtors [Customer: filial]   — har filial o'z ulushi
+            Кт Tranzit kassa                     — jami
+
+        Kassa faqat TRANZIT — ikkala JE'dan keyin qoldig'i o'zgarmaydi,
+        lekin kassa hisobotlarida kirim/chiqim sifatida ko'rinadi (egalar
+        talabi shu edi). Manba kompaniyaning O'Z ulushi chiqarilmaydi —
+        o'z xarajat hisoblarida qoladi.
+        """
         if not cint(self.create_source_reversal):
             return []
 
         grouped_by_company = self.get_grouped_expenses_by_company()
-        if not grouped_by_company:
+        grouped_expenses = grouped_by_company.get(self.expense_source_company, {})
+        if not grouped_expenses:
+            return []
+
+        debtor_rows = self.get_branch_share_rows()
+        recharged_total = flt(sum(a for _c, _co, a in debtor_rows), 2)
+        if recharged_total <= 0.005:
             return []
 
         created = []
-        if self.source_reversal_journal_entry and frappe.db.exists(
-            "Journal Entry", self.source_reversal_journal_entry
-        ):
-            return [self.source_reversal_journal_entry]
 
-        journal_entry = self.create_company_reversal_journal_entry(
-            self.expense_source_company,
-            self.source_offset_account,
-            grouped_by_company.get(self.expense_source_company, {}),
-            "source reversal",
-        )
-        if journal_entry:
-            self.db_set("source_reversal_journal_entry", journal_entry)
-            self.source_reversal_journal_entry = journal_entry
-            created.append(journal_entry)
+        if not (
+            self.source_reversal_journal_entry
+            and frappe.db.exists("Journal Entry", self.source_reversal_journal_entry)
+        ):
+            je_name = self.create_reversal_to_cash_je(grouped_expenses, recharged_total)
+            if je_name:
+                self.db_set("source_reversal_journal_entry", je_name)
+                self.source_reversal_journal_entry = je_name
+                created.append(je_name)
+
+        if not (
+            self.get("source_receivable_journal_entry")
+            and frappe.db.exists("Journal Entry", self.source_receivable_journal_entry)
+        ):
+            je_name = self.create_cash_to_receivable_je(debtor_rows, recharged_total)
+            if je_name:
+                self.db_set("source_receivable_journal_entry", je_name)
+                self.source_receivable_journal_entry = je_name
+                created.append(je_name)
 
         return created
 
     def get_grouped_expenses_by_company(self):
+        """Xarajatlarni kompaniya -> (hisob, cost center) bo'yicha jamlash.
+
+        Expenses jadvali endi hisob bo'yicha JAMLANGAN (cost_center bo'sh),
+        shuning uchun kalitga kompaniyaning standart cost markazi tushadi.
+        """
         grouped_by_company = {}
         default_cost_centers = {}
         for expense in self.expenses:
@@ -888,39 +947,22 @@ class JaziraExpenseAllocation(Document):
 
         return grouped_by_company
 
-    def create_company_reversal_journal_entry(self, company, offset_account, grouped_expenses, label):
-        """Manba kompaniyada filiallarga qayta yozilgan ulushni chiqarish.
-
-        MUHIM: manba kompaniyaning O'Z ulushi chiqarilmaydi — u o'z joyida,
-        o'z xarajat hisoblarida qoladi. Faqat boshqa kompaniyalarga tegishli
-        qism kamaytiriladi, va uning qarshi tomoni har bir filial uchun
-        ALOHIDA debitorlik qatori bo'lib, party (ichki mijoz) bilan yoziladi.
-        Shu tufayli qarzni Akt Sverkada ko'rish va Payment Entry bilan yopish
-        mumkin bo'ladi.
-        """
-        total_expense = flt(sum(grouped_expenses.values()), 2)
-        if abs(total_expense) <= 0.005:
-            return None
-
-        # Har bir filial (manbadan tashqari) uchun qarz qatorlari
-        debtor_rows = []
+    def get_branch_share_rows(self):
+        """Har bir filial (manbadan tashqari) uchun (customer, company, ulush)."""
+        rows = []
         for row in self.companies:
-            if row.company == company:
+            if row.company == self.expense_source_company:
                 continue
             amount = flt(row.allocated_expense_amount, 2)
             if amount <= 0:
                 continue
             customer = get_internal_customer(row.company)
             if not customer:
-                frappe.throw(
-                    _("'{0}' uchun ichki mijoz topilmadi").format(row.company)
-                )
-            debtor_rows.append((customer, row.company, amount))
+                frappe.throw(_("'{0}' uchun ichki mijoz topilmadi").format(row.company))
+            rows.append((customer, row.company, amount))
+        return rows
 
-        recharged_total = flt(sum(a for _c, _co, a in debtor_rows), 2)
-        if recharged_total <= 0.005:
-            return None
-
+    def new_allocation_je(self, company, label):
         je = frappe.new_doc("Journal Entry")
         je.voucher_type = "Journal Entry"
         je.company = company
@@ -929,31 +971,38 @@ class JaziraExpenseAllocation(Document):
             f"{ALLOCATION_REMARK_PREFIX} {self.name} | "
             f"{self.from_date} - {self.to_date} | {label}"
         )
-
         if journal_entry_has_allocation_field():
             je.custom_jazira_expense_allocation = self.name
+        return je
 
-        # Дт — har bir filial alohida, party bilan
-        for customer, branch, amount in debtor_rows:
-            je.append(
-                "accounts",
-                {
-                    "account": offset_account,
-                    "party_type": "Customer",
-                    "party": customer,
-                    "debit_in_account_currency": amount,
-                    "credit_in_account_currency": 0,
-                    "user_remark": f"{je.user_remark} | {branch}",
-                },
-            )
+    def create_reversal_to_cash_je(self, grouped_expenses, recharged_total):
+        """JE-1: Дт Tranzit kassa (jami) / Кт ma'muriy hisoblar (nisbatda)."""
+        total_expense = flt(sum(grouped_expenses.values()), 2)
+        if abs(total_expense) <= 0.005:
+            return None
 
-        # Кт — asl xarajat hisoblari, qayta yozilgan ulush nisbatida
+        je = self.new_allocation_je(
+            self.expense_source_company, "xarajatlarni kassaga yopish (filiallar ulushi)"
+        )
+
+        # Дт — tranzit kassa, bitta qator, jami summa
+        je.append(
+            "accounts",
+            {
+                "account": self.source_cash_account,
+                "debit_in_account_currency": recharged_total,
+                "credit_in_account_currency": 0,
+                "user_remark": je.user_remark,
+            },
+        )
+
+        # Кт — asl xarajat hisoblari, filiallar ulushi nisbatida
         ratio = recharged_total / total_expense if total_expense else 0
         credited = 0.0
         items = [(k, v) for k, v in grouped_expenses.items() if abs(flt(v, 2)) > 0.005]
         for idx, ((account, cost_center), net_amount) in enumerate(items):
             share = flt(flt(net_amount) * ratio, 2)
-            # Oxirgi qatorga yaxlitlash qoldig'i beriladi — jami aniq mos kelsin
+            # Oxirgi qatorga yaxlitlash qoldig'i — jami aniq mos kelsin
             if idx == len(items) - 1:
                 share = flt(recharged_total - credited, 2)
             credited = flt(credited + share, 2)
@@ -972,6 +1021,101 @@ class JaziraExpenseAllocation(Document):
         je.insert(ignore_permissions=True)
         je.submit()
         return je.name
+
+    def create_cash_to_receivable_je(self, debtor_rows, recharged_total):
+        """JE-2: Дт 1310 [Customer: filial] (ulushlar) / Кт Tranzit kassa (jami)."""
+        je = self.new_allocation_je(
+            self.expense_source_company, "kassadan filial qarziga (1310)"
+        )
+
+        # Дт — har filial alohida, party bilan
+        for customer, branch, amount in debtor_rows:
+            je.append(
+                "accounts",
+                {
+                    "account": self.source_offset_account,
+                    "party_type": "Customer",
+                    "party": customer,
+                    "debit_in_account_currency": amount,
+                    "credit_in_account_currency": 0,
+                    "user_remark": f"{je.user_remark} | {branch}",
+                },
+            )
+
+        # Кт — tranzit kassa, jami
+        je.append(
+            "accounts",
+            {
+                "account": self.source_cash_account,
+                "debit_in_account_currency": 0,
+                "credit_in_account_currency": recharged_total,
+                "user_remark": je.user_remark,
+            },
+        )
+
+        je.insert(ignore_permissions=True)
+        je.submit()
+        return je.name
+
+    def get_branch_admin_spread(self, row, amount):
+        """Filial ulushini hovuz tarkibi nisbatida MOS hisoblarga taqsimlash.
+
+        Hovuz (Sklad'ning 52002 xarajatlari) hisob nomlari bo'yicha olinadi,
+        filialda XUDDI SHU NOMLI hisob 52002 guruhi ostidan qidiriladi
+        (raqam bo'yicha emas — masalan "Ish haqqi" Sklad'da 5201, filialda
+        5259). Topilmaganlari row.expense_account'ga jamlanadi.
+
+        Qaytaradi: [(account, summa)] — yig'indisi aynan `amount`.
+        """
+        pool_total = flt(self.total_expense_amount, 2)
+        pool_items = [
+            (e.account_name, flt(e.net_amount))
+            for e in self.expenses
+            if e.company == self.expense_source_company and abs(flt(e.net_amount)) > 0.005
+        ]
+        if not pool_items or pool_total <= 0:
+            return [(row.expense_account, amount)]
+
+        admin_group = frappe.db.get_value(
+            "Account",
+            {
+                "company": row.company,
+                "account_number": ADMIN_EXPENSE_GROUP,
+                "root_type": "Expense",
+                "is_group": 1,
+            },
+            "name",
+        )
+
+        raw = {}
+        for account_name, net in pool_items:
+            target = None
+            if admin_group and account_name:
+                target = frappe.db.get_value(
+                    "Account",
+                    {
+                        "company": row.company,
+                        "parent_account": admin_group,
+                        "account_name": account_name,
+                        "is_group": 0,
+                    },
+                    "name",
+                )
+            target = target or row.expense_account
+            raw[target] = raw.get(target, 0) + amount * flt(net) / pool_total
+
+        rows = [(acc, flt(v, 2)) for acc, v in raw.items()]
+        rows = [(acc, v) for acc, v in rows if abs(v) > 0.005]
+        if not rows:
+            return [(row.expense_account, amount)]
+
+        # Yaxlitlash qoldig'i eng katta qatorga — jami aynan amount bo'lsin
+        diff = flt(amount - sum(v for _a, v in rows), 2)
+        if abs(diff) > 0.001:
+            idx = max(range(len(rows)), key=lambda i: abs(rows[i][1]))
+            rows[idx] = (rows[idx][0], flt(rows[idx][1] + diff, 2))
+
+        return rows
 
     def create_allocation_journal_entries(self):
         created = []
@@ -1009,27 +1153,41 @@ class JaziraExpenseAllocation(Document):
             if journal_entry_has_allocation_field():
                 je.custom_jazira_expense_allocation = self.name
 
-            debit_row = {
-                "account": row.expense_account,
-                "debit_in_account_currency": amount,
-                "credit_in_account_currency": 0,
-                "user_remark": je.user_remark,
-            }
-            # Кт — Skladga qarz, party (ichki taminotchi) bilan qayd etiladi
-            credit_row = {
-                "account": row.offset_account,
-                "party_type": "Supplier",
-                "party": source_supplier,
-                "debit_in_account_currency": 0,
-                "credit_in_account_currency": amount,
-                "user_remark": je.user_remark,
-            }
+            # Дт — ulush filialning MOS ma'muriy hisoblariga sochiladi
+            # (hovuz tarkibi nisbatida: Ish haqqi ulushi -> filialning
+            # "Ish haqqi"siga va h.k.). Mos hisob topilmasa —
+            # row.expense_account ("Ма'мурий харажат улуши") ga tushadi.
+            for account, share in self.get_branch_admin_spread(row, amount):
+                debit_row = {
+                    "account": account,
+                    "user_remark": je.user_remark,
+                }
+                if share > 0:
+                    debit_row.update(
+                        {"debit_in_account_currency": share, "credit_in_account_currency": 0}
+                    )
+                else:
+                    debit_row.update(
+                        {"debit_in_account_currency": 0, "credit_in_account_currency": abs(share)}
+                    )
+                if row.cost_center:
+                    debit_row["cost_center"] = row.cost_center
+                je.append("accounts", debit_row)
 
-            if row.cost_center:
-                debit_row["cost_center"] = row.cost_center
-
-            je.append("accounts", debit_row)
-            je.append("accounts", credit_row)
+            # Кт — Skladga qarz, party (ichki taminotchi) bilan qayd etiladi.
+            # Qarz keyin filialning odatiy Kassa to'lovlari (Дт 2110) bilan
+            # tabiiy ravishda yopiladi.
+            je.append(
+                "accounts",
+                {
+                    "account": row.offset_account,
+                    "party_type": "Supplier",
+                    "party": source_supplier,
+                    "debit_in_account_currency": 0,
+                    "credit_in_account_currency": amount,
+                    "user_remark": je.user_remark,
+                },
+            )
 
             je.insert(ignore_permissions=True)
             je.submit()
@@ -1047,101 +1205,9 @@ class JaziraExpenseAllocation(Document):
         return created
 
     # ------------------------------------------------------------------
-    # Qarzni yopish — взаимозачёт (netting), pul harakatisiz
+    # Bekor qilish. cancel_netting/settlement — ESKI hujjatlar uchun
+    # saqlangan (yangi mexanizm взаимозачёт/PE yaratmaydi).
     # ------------------------------------------------------------------
-
-    def create_netting_journal_entries(self):
-        """Filial qarzini ВЗАИМОЗАЧЁТ bilan yopadi — kassa TEGILMAYDI.
-
-        Biznes haqiqati (tekshirilgan): filiallar har kuni butun tushumini
-        Skladga topshiradi va kassalari doim ~0 da turadi. Ya'ni ma'muriy
-        ulush uchun ular ALLAQACHON pul berib bo'lgan — bu pul filial
-        kitobida "1310 Debtors [Sklad]" debit qoldig'i bo'lib turibdi
-        (Saripul ~1.6 mlrd, XB ~1.1 mlrd). Yangi "naqd to'lov" yaratish
-        o'sha bo'sh kassalarni minusga tushirar edi.
-
-        Shuning uchun har filialda bitta JE:
-            Дт 2110 Creditors [Supplier: Sklad]  (ref: allocation JE -> qarz yopiladi)
-                Кт 1310 Debtors [Customer: Sklad]  (topshirilgan pul hisobidan)
-
-        reference_type='Journal Entry' tufayli Payment Ledger yozuvi aynan
-        allocation JE'ga qarshi tushadi va qarz rasman "yopilgan" bo'ladi
-        (get_outstanding_on_journal_entry = 0). Sklad tomonida hech narsa
-        yaratilmaydi — uning kitobida qoldiqlar allaqachon to'g'ri.
-        """
-        if not cint(self.get("create_settlement_payments")):
-            return []
-
-        source_company = self.expense_source_company
-        source_supplier = get_internal_supplier(source_company)
-        source_customer = get_internal_customer(source_company)
-        if not source_supplier or not source_customer:
-            frappe.throw(
-                _("'{0}' uchun ichki mijoz/taminotchi topilmadi").format(source_company)
-            )
-
-        created = []
-        for row in self.companies:
-            amount = flt(row.allocated_expense_amount, 2)
-            if amount <= 0 or row.company == source_company:
-                continue
-            if not row.allocation_journal_entry:
-                continue
-            if row.get("netting_journal_entry") and frappe.db.exists(
-                "Journal Entry", row.netting_journal_entry
-            ):
-                continue
-
-            receivable = get_default_clearing_account(row.company)
-            if not receivable:
-                frappe.throw(
-                    _("'{0}' uchun debitorlik (1310) hisobi topilmadi").format(row.company)
-                )
-
-            je = frappe.new_doc("Journal Entry")
-            je.voucher_type = "Journal Entry"
-            je.company = row.company
-            je.posting_date = self.posting_date or self.to_date
-            je.user_remark = (
-                f"{ALLOCATION_REMARK_PREFIX} {self.name} | "
-                f"{self.from_date} - {self.to_date} | {row.company} взаимозачёт"
-            )
-            if journal_entry_has_allocation_field():
-                je.custom_jazira_expense_allocation = self.name
-
-            # Дт — Skladga qarz yopiladi, allocation JE'ga ilinadi
-            je.append("accounts", {
-                "account": row.offset_account,
-                "party_type": "Supplier",
-                "party": source_supplier,
-                "debit_in_account_currency": amount,
-                "credit_in_account_currency": 0,
-                "reference_type": "Journal Entry",
-                "reference_name": row.allocation_journal_entry,
-                "user_remark": je.user_remark,
-            })
-            # Кт — allaqachon Skladga topshirilgan pul hisobidan
-            je.append("accounts", {
-                "account": receivable,
-                "party_type": "Customer",
-                "party": source_customer,
-                "debit_in_account_currency": 0,
-                "credit_in_account_currency": amount,
-                "user_remark": je.user_remark,
-            })
-
-            je.flags.ignore_permissions = True
-            je.insert()
-            je.submit()
-
-            frappe.db.set_value(
-                row.doctype, row.name, "netting_journal_entry", je.name,
-                update_modified=False,
-            )
-            row.netting_journal_entry = je.name
-            created.append(je.name)
-
-        return created
 
     def cancel_netting_journal_entries(self):
         for row in self.companies:
@@ -1178,6 +1244,9 @@ class JaziraExpenseAllocation(Document):
 
     def cancel_expense_reversal_journal_entries(self):
         journal_entries = []
+        # Avval JE-2 (1310 <- kassa), keyin JE-1 (kassa <- xarajatlar)
+        if self.get("source_receivable_journal_entry"):
+            journal_entries.append(self.source_receivable_journal_entry)
         if self.source_reversal_journal_entry:
             journal_entries.append(self.source_reversal_journal_entry)
         journal_entries.extend(
@@ -1328,6 +1397,47 @@ def get_internal_supplier(company):
         return None
     return frappe.db.get_value(
         "Supplier", {"represents_company": company, "is_internal_supplier": 1}, "name"
+    )
+
+
+@frappe.whitelist()
+def get_default_source_cash_account(company):
+    """Tranzit kassa — "Shaxboz kassa" (naqd).
+
+    Egalar sxemasida filiallar ulushi avval SHU kassaga "tushadi" (JE-1),
+    keyin undan filial qarziga o'tadi (JE-2). Qidiruv tartibi:
+      1) nomida "shaxboz" bo'lgan Mode of Payment'ning shu kompaniyadagi
+         hisobi (jonli bazada: "Нахт Склад Shaxboz" -> 1110 - Нахт - JS);
+      2) kompaniyaning default_cash_account'i;
+      3) birinchi Cash hisob.
+    """
+    if not company:
+        return None
+
+    mop_account = frappe.db.sql(
+        """
+        SELECT mpa.default_account
+        FROM `tabMode of Payment Account` mpa
+        INNER JOIN `tabMode of Payment` mop ON mop.name = mpa.parent
+        WHERE mpa.company = %s
+          AND (LOWER(mop.name) LIKE '%%shaxboz%%' OR LOWER(mop.name) LIKE '%%шахбоз%%')
+          AND IFNULL(mpa.default_account, '') != ''
+        LIMIT 1
+        """,
+        (company,),
+    )
+    if mop_account and mop_account[0][0]:
+        return mop_account[0][0]
+
+    account = get_company_default(company, "default_cash_account")
+    if account:
+        return account
+
+    return frappe.db.get_value(
+        "Account",
+        {"company": company, "account_type": "Cash", "is_group": 0},
+        "name",
+        order_by="lft asc",
     )
 
 

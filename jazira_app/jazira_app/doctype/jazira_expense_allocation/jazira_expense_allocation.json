@@ -14,10 +14,11 @@
   "expense_source_company",
   "create_source_reversal",
   "source_offset_account",
-  "create_settlement_payments",
+  "source_cash_account",
   "currency",
   "status",
   "source_reversal_journal_entry",
+  "source_receivable_journal_entry",
   "section_settings",
   "profit_source",
   "section_companies",
@@ -100,11 +101,13 @@
    "options": "Account"
   },
   {
-   "default": "1",
-   "description": "Submit qilinganda filial qarzi взаимозачёт Journal Entry bilan yopiladi — filial allaqachon Skladga topshirgan pul hisobidan. Kassa/naqd hisoblarga TEGILMAYDI, pul harakati yo'q.",
-   "fieldname": "create_settlement_payments",
-   "fieldtype": "Check",
-   "label": "Qarzni yopish (взаимозачёт)"
+   "depends_on": "eval:doc.create_source_reversal",
+   "description": "JE-1/JE-2 shu kassa orqali o'tadi (tranzit — qoldiq o'zgarmaydi). Standart: Shaxboz kassa (Нахт).",
+   "fieldname": "source_cash_account",
+   "fieldtype": "Link",
+   "label": "Tranzit kassa (naqd)",
+   "mandatory_depends_on": "eval:doc.create_source_reversal",
+   "options": "Account"
   },
   {
    "fieldname": "currency",
@@ -128,6 +131,15 @@
    "fieldname": "source_reversal_journal_entry",
    "fieldtype": "Link",
    "label": "Source Reversal Journal Entry",
+   "no_copy": 1,
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.source_receivable_journal_entry",
+   "fieldname": "source_receivable_journal_entry",
+   "fieldtype": "Link",
+   "label": "Source Receivable Journal Entry",
    "no_copy": 1,
    "options": "Journal Entry",
    "read_only": 1

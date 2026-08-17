@@ -177,6 +177,14 @@ frappe.ui.form.on('Jazira Expense Allocation', {
                 is_group: 0
             }
         }));
+
+        frm.set_query('source_cash_account', () => ({
+            filters: {
+                company: frm.doc.expense_source_company,
+                is_group: 0,
+                account_type: 'Cash'
+            }
+        }));
     },
 
     onload(frm) {
@@ -211,6 +219,7 @@ frappe.ui.form.on('Jazira Expense Allocation', {
 
     expense_source_company(frm) {
         frm.set_value('source_offset_account', '');
+        frm.set_value('source_cash_account', '');
         frm.trigger('fill_default_clearing_account');
         frm.trigger('clear_calculation');
         schedule_jazira_auto_calculation(frm);
@@ -223,18 +232,30 @@ frappe.ui.form.on('Jazira Expense Allocation', {
         if (!frm.doc.expense_source_company || frm.doc.docstatus !== 0) {
             return;
         }
-        if (frm.doc.source_offset_account) {
-            return;
-        }
-        frappe.call({
-            method: 'jazira_app.jazira_app.doctype.jazira_expense_allocation.jazira_expense_allocation.get_default_clearing_account',
-            args: { company: frm.doc.expense_source_company },
-            callback(r) {
-                if (r.message && !frm.doc.source_offset_account) {
-                    frm.set_value('source_offset_account', r.message);
+        if (!frm.doc.source_offset_account) {
+            frappe.call({
+                method: 'jazira_app.jazira_app.doctype.jazira_expense_allocation.jazira_expense_allocation.get_default_clearing_account',
+                args: { company: frm.doc.expense_source_company },
+                callback(r) {
+                    if (r.message && !frm.doc.source_offset_account) {
+                        frm.set_value('source_offset_account', r.message);
+                    }
                 }
-            }
-        });
+            });
+        }
+
+        // Tranzit kassa (Shaxboz naqd) — standart qiymat
+        if (!frm.doc.source_cash_account) {
+            frappe.call({
+                method: 'jazira_app.jazira_app.doctype.jazira_expense_allocation.jazira_expense_allocation.get_default_source_cash_account',
+                args: { company: frm.doc.expense_source_company },
+                callback(r) {
+                    if (r.message && !frm.doc.source_cash_account) {
+                        frm.set_value('source_cash_account', r.message);
+                    }
+                }
+            });
+        }
     },
 
     create_source_reversal(frm) {

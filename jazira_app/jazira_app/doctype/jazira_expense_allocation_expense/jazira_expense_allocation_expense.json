@@ -19,24 +19,20 @@
  ],
  "fields": [
   {
-   "columns": 2,
    "fieldname": "journal_entry",
    "fieldtype": "Link",
-   "in_list_view": 1,
    "label": "Journal Entry",
    "options": "Journal Entry",
    "read_only": 1
   },
   {
-   "columns": 1,
    "fieldname": "posting_date",
    "fieldtype": "Date",
-   "in_list_view": 1,
    "label": "Posting Date",
    "read_only": 1
   },
   {
-   "columns": 2,
+   "columns": 1,
    "fieldname": "company",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -45,7 +41,7 @@
    "read_only": 1
   },
   {
-   "columns": 2,
+   "columns": 3,
    "fieldname": "account",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -57,7 +53,9 @@
    "fieldname": "account_name",
    "fieldtype": "Data",
    "label": "Account Name",
-   "read_only": 1
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
   },
   {
    "fieldname": "cost_center",
@@ -87,15 +85,17 @@
    "fieldname": "net_amount",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Net xarajat",
+   "label": "Jami xarajat",
    "options": "Company:company:default_currency",
    "read_only": 1
   },
   {
    "fieldname": "user_remark",
    "fieldtype": "Small Text",
-   "label": "Izoh",
-   "read_only": 1
+   "label": "Manba",
+   "read_only": 1,
+   "in_list_view": 1,
+   "columns": 2
   },
   {
    "fieldname": "journal_entry_detail",
