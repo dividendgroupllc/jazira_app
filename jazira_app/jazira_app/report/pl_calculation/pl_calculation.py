@@ -129,6 +129,9 @@ def get_opening_balances(companies, from_date):
 		fetch_owner_draws(companies, f, t),
 	)
 	d = pdata["opening"]
+	# ERPNext'dan oldingi davr (Google Sheet) jamg'armasi ham shu yerda
+	# avtomatik tushadi: u 2026-05-31 sanali ochilish JE sifatida 3200/3201
+	# schetlarda turadi va fetch_dividends uni opening davrida o'qiydi.
 	return {o["key"]: owner_balance(d, o, companies) for o in OWNERS}
 
 
@@ -323,8 +326,9 @@ def build_rows(period_list, companies, pdata, section, opening=None):
 				rows.append(mk(f"{name} Sheff oylik", salary, "detail", 1))
 			if not all_zero(taken):
 				rows.append(mk(f"{name} Sheff olingan pul", taken, "detail", 1, is_cost=True))
-			if not all_zero(dividend):
-				rows.append(mk(f"Dividend {name}", dividend, "detail", 1, is_cost=True))
+			# Dividend qatori DOIM ko'rinadi — 0 bo'lsa ham (egalar talabi:
+			# yillik dividend hali yozilmaganini ko'rish uchun joyi turishi kerak).
+			rows.append(mk(f"Dividend {name}", dividend, "detail", 1, is_cost=True))
 			rows.append(mk(f"{name} Sheff qoldiq", balance, "result", 1))
 
 		# ── Тақ. фойда (ўсиб борувчи қолдиқ) ─────────────────────────────────

@@ -148,9 +148,33 @@ def _classify_cost_bucket(account_number, account_name):
 #   Смарт      — 100% Акмал
 #   қолганлари — 50/50 (фойда ҳам, ЗАРАР ҳам)
 OWNERS = [
-	{"key": "akmal", "label": "Акмал", "account": "3200", "employee": "Akmal aka shef"},
-	{"key": "elyor", "label": "Элёр", "account": "3201", "employee": "Elyor Aka Sheff"},
+	{"key": "akmal", "label": "Акмал", "account": "3200",
+	 "employee": "Akmal aka shef", "shareholder_title": "Akmal aka"},
+	{"key": "elyor", "label": "Элёр", "account": "3201",
+	 "employee": "Elyor Aka Sheff", "shareholder_title": "Elyor aka"},
 ]
+
+
+def resolve_owner_parties():
+	"""GL'dagi party -> ega kaliti xaritasi.
+
+	Egalar pulni ikki yo'l bilan olishi mumkin:
+	  · Employee sifatida (tarixiy yozuvlar) — party = employee nomi;
+	  · Shareholder sifatida (yangi tartib) — party = Shareholder hujjati
+	    NOMI (ACC-SH-...), title bo'yicha topiladi.
+	Shareholder hali ochilmagan muhitda (masalan prod migrate'dan oldin)
+	jimgina o'tkazib yuboriladi.
+	"""
+	parties = {}
+	for o in OWNERS:
+		if o.get("employee"):
+			parties[o["employee"]] = o["key"]
+		title = o.get("shareholder_title")
+		if title:
+			name = frappe.db.get_value("Shareholder", {"title": title}, "name")
+			if name:
+				parties[name] = o["key"]
+	return parties
 COMPANY_SHARES = {
 	"Jazira Smart": {"akmal": 1.0, "elyor": 0.0},
 }
@@ -302,13 +326,15 @@ def fetch_owner_draws(companies, from_date, to_date):
 	ҳисоблашда уни харажатдан қайтариб қўшиш керак — акс ҳолда эгалар ўз
 	олган пули ҳисобига ўз дивидендини камайтириб юборади.
 	"""
-	employees = [o["employee"] for o in OWNERS]
+	parties = list(resolve_owner_parties())
+	if not parties:
+		return []
 	return frappe.db.sql(
 		"""
 		SELECT gle.company, gle.party, gle.posting_date,
 			   SUM(gle.debit) AS taken, SUM(gle.credit) AS accrued
 		FROM `tabGL Entry` gle
-		WHERE gle.party_type = 'Employee'
+		WHERE gle.party_type IN ('Employee', 'Shareholder')
 		  AND gle.party IN %(employees)s
 		  AND gle.company IN %(companies)s
 		  AND gle.is_cancelled = 0
@@ -316,7 +342,7 @@ def fetch_owner_draws(companies, from_date, to_date):
 		GROUP BY gle.company, gle.party, gle.posting_date
 		""",
 		{
-			"employees": tuple(employees),
+			"employees": tuple(parties),
 			"companies": tuple(companies),
 			"from_date": from_date,
 			"to_date": to_date,
@@ -446,7 +472,7 @@ def aggregate(period_list, companies, gl_rows, internal_rows, dividend_rows, own
 		if pk and r.account_number in pdata[pk]["dividends"]:
 			pdata[pk]["dividends"][r.account_number] += flt(r.amount)
 
-	by_employee = {o["employee"]: o["key"] for o in OWNERS}
+	by_employee = resolve_owner_parties()
 	for r in owner_rows:
 		pk = _period_key(r.posting_date, period_list)
 		key = by_employee.get(r.party)
