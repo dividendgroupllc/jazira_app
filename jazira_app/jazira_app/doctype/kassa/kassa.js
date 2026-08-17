@@ -15,6 +15,16 @@ frappe.ui.form.on('Kassa', {
     
     onload(frm) {
         frm.trigger('setup_filters');
+
+        // Amend/Duplicate nusxasida eski hujjatning JE/PE havolalari formada
+        // ko'rinib turmasin — server ham insert'da tozalaydi (kassa.py),
+        // bu yerda esa saqlashdan OLDIN ham ko'rinmasligi ta'minlanadi.
+        if (frm.is_new()) {
+            ['journal_entry', 'payment_entry', 'payment_entry_receive',
+             'payment_entry_supplier'].forEach((f) => {
+                if (frm.doc[f]) frm.doc[f] = null;
+            });
+        }
     },
     
     refresh(frm) {

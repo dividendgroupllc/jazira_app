@@ -23,6 +23,37 @@ DIVIDEND_ACCOUNT_NUMBERS = {
 class Kassa(Document):
     """Kassa Document."""
     
+    # Submit paytida yaratiladigan hujjatlarga havolalar. Bular faqat
+    # o'sha hujjatning O'ZIGA db_set qilinadi — yangi yozuvda doim bo'sh
+    # bo'lishi shart.
+    LINKED_VOUCHER_FIELDS = (
+        "journal_entry",
+        "payment_entry",
+        "payment_entry_receive",
+        "payment_entry_supplier",
+    )
+
+    def insert(self, *args, **kwargs):
+        # Duplicate/Amend'da eski Kassaning JE/PE havolalari yangi hujjatga
+        # ko'chib qolmasin. JSON'dagi no_copy=1 Duplicate'da ishlaydi, lekin
+        # AMEND'da emas — Frappe amend nusxasida no_copy maydonlarni ataylab
+        # saqlaydi (frappe.model copy_doc: `!df.no_copy || from_amend`).
+        #
+        # Tozalash before_insert'da EMAS, shu yerda: Frappe insert() ichida
+        # _validate_links() before_insert'dan OLDIN ishlaydi
+        # (frappe/model/document.py:301-302). Eski havola bekor qilingan
+        # hujjatga ko'rsatsa, tozalashdan oldin "Cannot link cancelled
+        # document" xatosi otilardi.
+        self.clear_copied_voucher_links()
+        return super().insert(*args, **kwargs)
+
+    def clear_copied_voucher_links(self):
+        if not self.is_new():
+            return
+        for fieldname in self.LINKED_VOUCHER_FIELDS:
+            if self.get(fieldname):
+                self.set(fieldname, None)
+
     def validate(self):
         self.validate_summa()
         self.validate_kontragent()
