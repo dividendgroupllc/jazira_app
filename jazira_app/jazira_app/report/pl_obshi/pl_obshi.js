@@ -58,12 +58,6 @@ frappe.query_reports["PL Obshi"] = {
 			"options": "Yearly\nHalf-Yearly\nQuarterly\nMonthly",
 			"default": "Monthly",
 			"reqd": 1
-		},
-		{
-			"fieldname": "eliminate_internal",
-			"label": __("Ички айланмани чиқариб ташлаш"),
-			"fieldtype": "Check",
-			"default": 1
 		}
 	],
 

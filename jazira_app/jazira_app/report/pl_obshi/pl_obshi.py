@@ -39,7 +39,7 @@ umumiy ma'muriy xarajat (икки марта саналмайди). Tekshirildi:
 
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 
 from jazira_app.jazira_app.report.pl_hisoboti.pl_hisoboti import (
 	build_period_list,
@@ -201,8 +201,12 @@ def execute(filters=None):
 	if not companies:
 		frappe.throw(_("Ишчи компания топилмади"))
 
-	eliminate = filters.get("eliminate_internal")
-	eliminate = 1 if eliminate in (None, "") else int(eliminate)
+	# Ichki aylanma DOIM chiqariladi — bu konsolidatsiyaning to'g'ri holati.
+	# (Filtr va "(−) Ички айланма" qatorlari egalar talabi bilan olib
+	# tashlangan: chalg'itardi, sheet'da ham yo'q edi. Kompaniya kesimi
+	# qatorlari to'liq o'z daromadini ko'rsatadi, jami esa ichki sotuvsiz —
+	# farqi ichki aylanma ekanini egalar biladi.)
+	eliminate = 1
 
 	gl_rows = fetch_gl(companies, from_date, to_date)
 	internal_rows = fetch_internal_sales(companies, from_date, to_date) if eliminate else []
@@ -604,10 +608,7 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 		if all_zero(vm):
 			continue
 		rows.append(mk(f"Выручка {company_label(co)}", vm, "detail", 1))
-	if eliminate:
-		vm = per_period(lambda d: -d["internal"])
-		if not all_zero(vm):
-			rows.append(mk("(−) Ички айланма (гуруҳ ичидаги сотув)", vm, "detail", 1))
+
 
 	# ── ИТОГО СЕБЕСТОИМОСТЬ ──────────────────────────────────────────────────
 	# Ҳар бир таркибий қисм алоҳида кўрсатилади: аввал турлар бўйича
@@ -641,10 +642,7 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 			if all_zero(cvm):
 				continue
 			rows.append(mk(f"{bucket_label} {company_label(co)}", cvm, "detail", 2, is_cost=True))
-	if eliminate:
-		vm = per_period(lambda d: -d["internal"])
-		if not all_zero(vm):
-			rows.append(mk("(−) Ички айланма (гуруҳ ичидаги харид)", vm, "detail", 1, is_cost=True))
+
 
 	# ── МАРЖИНАЛЬНАЯ ПРИБЫЛЬ ─────────────────────────────────────────────────
 	rows.append(mk("Маржинальная прибыль", per_period(_total_marginal), "result", 0))
@@ -685,8 +683,23 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 	adm_vm = per_period(_total_adm)
 	if not all_zero(adm_vm):
 		rows.append(mk("Операционные расходы Административ", adm_vm, "sub", 1, is_cost=True))
-		for acc_label, acc_vm in _account_rows(period_list, pdata, "adm", companies):
-			rows.append(mk(acc_label, acc_vm, "detail", 2, is_cost=True))
+		# Ichki qatorlar — TAQSIMLASHDAN OLDINGI jamlangan schetlar
+		# (adm_raw): "Ish haqqi" bitta qator bo'lib butun hovuz summasini
+		# ko'rsatadi. Jami esa taqsimlangandan keyingisi bilan HAR DOIM
+		# teng — allocation JE'lari 52002 ichida guruh bo'ylab nolga
+		# tenglashadi (Sklad'dan kamayadi, filiallarga qo'shiladi).
+		adm_totals = {}
+		for p in period_list:
+			for acc, amt in pdata[p["key"]]["adm_raw"].items():
+				adm_totals[acc] = adm_totals.get(acc, 0) + flt(amt)
+		adm_labels = {}
+		for p in period_list:
+			adm_labels.update(pdata[p["key"]].get("acc_labels") or {})
+		for acc in sorted(adm_totals, key=lambda a: -abs(adm_totals[a])):
+			if not flt(adm_totals[acc]):
+				continue
+			avm = per_period(lambda d, a=acc: flt(d["adm_raw"].get(a, 0)))
+			rows.append(mk(adm_labels.get(acc, acc), avm, "detail", 2, is_cost=True))
 
 	other_vm = per_period(_total_other)
 	if not all_zero(other_vm):
@@ -698,34 +711,6 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 	# yuqorida chiqdi, (2) Адм расход (тақсимлашдан олдин), (3) Операционный
 	# прибыль филиаллар кесимида, (4) Операционный прибыль jami.
 	rows.append(divider())
-
-	# ── (2) АДМ РАСХОД (ТАҚСИМЛАШДАН ОЛДИНГИ ҲОЛАТ) ──────────────────────────
-	#
-	# Юқоридаги "Операционные расходы Административ" — Jazira Expense
-	# Allocation филиалларга ТАРҚАТГАНДАН КЕЙИНГИ ҳолат (Склад 23.7 млн,
-	# Сарипул 91.3 млн, Халк Банки 57.3 млн). Бу ерда эса ўша харажат
-	# ДАСТЛАБКИ ҳолида — қаерда юзага келган бўлса ўша ерда, счётма-счёт.
-	# Жами иккалада ҳам бир хил (2026-июнь: 172 375 784).
-	raw_total = per_period(lambda d: sum(
-		flt(v) for v in d["adm_raw"].values()))
-	if not all_zero(raw_total):
-		rows.append(mk("Адм расход (тақсимлашдан олдин)", raw_total, "root", 0, is_cost=True))
-
-		# Счётлар — умумий суммаси бўйича каттадан кичикка
-		totals = {}
-		for p in period_list:
-			for acc, amt in pdata[p["key"]]["adm_raw"].items():
-				totals[acc] = totals.get(acc, 0) + flt(amt)
-		labels = {}
-		for p in period_list:
-			labels.update(pdata[p["key"]].get("acc_labels") or {})
-
-		for acc in sorted(totals, key=lambda a: -abs(totals[a])):
-			if not flt(totals[acc]):
-				continue
-			avm = per_period(lambda d, a=acc: flt(d["adm_raw"].get(a, 0)))
-			rows.append(mk(labels.get(acc, acc), avm, "detail", 1, is_cost=True))
-		rows.append(divider())
 
 	# ── (3) КОМПАНИЯЛАР КЕСИМИДА ОПЕРАЦИОН ФОЙДА ─────────────────────────────
 	rows.append(mk(
@@ -768,6 +753,16 @@ def _account_rows(period_list, pdata, bucket, companies):
 	for p in period_list:
 		labels.update(pdata[p["key"]].get("acc_labels") or {})
 
+	# Bir xil NOMLI, har xil RAQAMLI schetlar bo'ladi (masalan "Ish haqqi"
+	# Sklad'da 5201, filiallarda 5259). Ular alohida qator bo'lib to'g'ri
+	# chiqadi, lekin yorliq bir xil bo'lib chalg'itardi — nom takrorlansa
+	# yoniga raqami qo'shiladi.
+	name_counts = {}
+	for acc in totals:
+		if flt(totals[acc]):
+			nm = labels.get(acc, acc)
+			name_counts[nm] = name_counts.get(nm, 0) + 1
+
 	result = []
 	for acc in sorted(totals, key=lambda a: -abs(totals[a])):
 		if not flt(totals[acc]):
@@ -780,5 +775,8 @@ def _account_rows(period_list, pdata, bucket, companies):
 				if cd:
 					total += flt(cd[bucket].get(acc, 0))
 			vm[_fk(p["key"])] = total
-		result.append((labels.get(acc, acc), vm))
+		label = labels.get(acc, acc)
+		if name_counts.get(label, 0) > 1 and acc != label:
+			label = f"{label} ({acc})"
+		result.append((label, vm))
 	return result
