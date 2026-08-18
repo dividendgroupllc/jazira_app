@@ -21,17 +21,25 @@ frappe.query_reports["Expense Analysis"] = {
 			width: "80",
 		},
 		{
+			// Jazira'da 4 ta ishchi kompaniya — filtrsiz hammasi aralash edi
+			fieldname: "company",
+			label: __("Компания"),
+			fieldtype: "Link",
+			options: "Company",
+			get_query: function () {
+				return { filters: { is_group: 0 } };
+			},
+		},
+		{
 			fieldname: "expense_account",
 			label: __("Харажат счёти"),
 			fieldtype: "Link",
 			options: "Account",
 			get_query: function () {
-				return {
-					filters: {
-						root_type: "Expense",
-						is_group: 0,
-					},
-				};
+				const company = frappe.query_report.get_filter_value("company");
+				const f = { root_type: "Expense", is_group: 0 };
+				if (company) f.company = company;
+				return { filters: f };
 			},
 		},
 
@@ -53,6 +61,12 @@ frappe.query_reports["Expense Analysis"] = {
 			label: __("Харажат маркази"),
 			fieldtype: "Link",
 			options: "Cost Center",
+			get_query: function () {
+				const company = frappe.query_report.get_filter_value("company");
+				const f = { is_group: 0 };
+				if (company) f.company = company;
+				return { filters: f };
+			},
 		},
 	],
 

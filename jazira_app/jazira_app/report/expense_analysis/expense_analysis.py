@@ -107,6 +107,13 @@ def get_columns():
             "width": 130,
         },
         {
+            "fieldname": "company",
+            "label": _("Компания"),
+            "fieldtype": "Link",
+            "options": "Company",
+            "width": 140,
+        },
+        {
             "fieldname": "remarks",
             "label": _("Изоҳ"),
             "fieldtype": "Data",
@@ -172,6 +179,7 @@ def get_data(filters):
 
         data.append({
             "posting_date": r.posting_date,
+            "company": r.company,
             "account": r.account,
             "root_type": r.root_type,
             "party_type": r.party_type or "",
@@ -212,6 +220,25 @@ def get_gl_entries(filters, from_date, to_date):
         "root_types": PNL_ROOT_TYPES,
     }
 
+    # Jazira'da 4 ta ishchi kompaniya bor — filtrsiz hammasi aralash chiqardi
+    if filters.get("company"):
+        conditions.append("gle.company = %(company)s")
+        params["company"] = filters["company"]
+
+    # Jazira Expense Allocation'ning texnik JE'lari (oylik yopish: teskari
+    # yozuv + filiallarga taqsimot) haqiqiy xarajat EMAS — ular kirsa,
+    # tahlilda 100M+ lik soxta qatorlar paydo bo'lardi. Boshqa PL
+    # hisobotlaridagi bilan bir xil istisno.
+    conditions.append(
+        """NOT EXISTS (
+            SELECT 1 FROM `tabJournal Entry` alloc_je
+            WHERE alloc_je.name = gle.voucher_no
+              AND gle.voucher_type = 'Journal Entry'
+              AND (IFNULL(alloc_je.custom_jazira_expense_allocation, '') != ''
+                   OR IFNULL(alloc_je.user_remark, '') LIKE 'Jazira Expense Allocation:%%')
+        )"""
+    )
+
     if filters.get("expense_account"):
         conditions.append("gle.account = %(expense_account)s")
         params["expense_account"] = filters["expense_account"]
@@ -249,6 +276,7 @@ def get_gl_entries(filters, from_date, to_date):
     return frappe.db.sql(f"""
         SELECT
             gle.posting_date,
+            gle.company,
             gle.account,
             gle.party_type,
             gle.party,
@@ -464,6 +492,25 @@ def get_category_breakdown(filters, from_date, to_date):
         "voucher_types": ALLOWED_VOUCHER_TYPES,
         "root_types": PNL_ROOT_TYPES,
     }
+
+    # Jazira'da 4 ta ishchi kompaniya bor — filtrsiz hammasi aralash chiqardi
+    if filters.get("company"):
+        conditions.append("gle.company = %(company)s")
+        params["company"] = filters["company"]
+
+    # Jazira Expense Allocation'ning texnik JE'lari (oylik yopish: teskari
+    # yozuv + filiallarga taqsimot) haqiqiy xarajat EMAS — ular kirsa,
+    # tahlilda 100M+ lik soxta qatorlar paydo bo'lardi. Boshqa PL
+    # hisobotlaridagi bilan bir xil istisno.
+    conditions.append(
+        """NOT EXISTS (
+            SELECT 1 FROM `tabJournal Entry` alloc_je
+            WHERE alloc_je.name = gle.voucher_no
+              AND gle.voucher_type = 'Journal Entry'
+              AND (IFNULL(alloc_je.custom_jazira_expense_allocation, '') != ''
+                   OR IFNULL(alloc_je.user_remark, '') LIKE 'Jazira Expense Allocation:%%')
+        )"""
+    )
 
     if filters.get("expense_account"):
         conditions.append("gle.account = %(expense_account)s")
