@@ -694,35 +694,18 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 		for acc_label, acc_vm in _account_rows(period_list, pdata, "other", companies):
 			rows.append(mk(acc_label, acc_vm, "detail", 2, is_cost=True))
 
-	# ── ОПЕРАЦИОННЫЙ ПРИБЫЛЬ ─────────────────────────────────────────────────
-	rows.append(mk("Операционный прибыль", per_period(_total_profit), "result", 0))
-	rows.append(mk(
-		"Рентабельность по операционной прибыли",
-		per_period(lambda d: _total_profit(d) / _total_revenue(d) * 100 if _total_revenue(d) else 0),
-		"percent", 1,
-	))
+	# Qator tartibi egalar talabi bilan: (1) Итого операционные расходы —
+	# yuqorida chiqdi, (2) Адм расход (тақсимлашдан олдин), (3) Операционный
+	# прибыль филиаллар кесимида, (4) Операционный прибыль jami.
 	rows.append(divider())
 
-	# ── КОМПАНИЯЛАР КЕСИМИДА ОПЕРАЦИОН ФОЙДА ─────────────────────────────────
-	rows.append(mk(
-		"Операционный прибыль (филиаллар кесимида)",
-		per_period(lambda d: sum(_co_profit(c) for c in d["companies"].values())),
-		"root", 0,
-	))
-	for co in companies:
-		vm = per_period(lambda d, c=co: _co_profit(d["companies"][c]))
-		if all_zero(vm):
-			continue
-		rows.append(mk(f"Операционный прибыль {company_label(co)}", vm, "detail", 1))
-
-	# ── АДМ РАСХОД (ТАҚСИМЛАШДАН ОЛДИНГИ ҲОЛАТ) ──────────────────────────────
+	# ── (2) АДМ РАСХОД (ТАҚСИМЛАШДАН ОЛДИНГИ ҲОЛАТ) ──────────────────────────
 	#
 	# Юқоридаги "Операционные расходы Административ" — Jazira Expense
 	# Allocation филиалларга ТАРҚАТГАНДАН КЕЙИНГИ ҳолат (Склад 23.7 млн,
 	# Сарипул 91.3 млн, Халк Банки 57.3 млн). Бу ерда эса ўша харажат
 	# ДАСТЛАБКИ ҳолида — қаерда юзага келган бўлса ўша ерда, счётма-счёт.
 	# Жами иккалада ҳам бир хил (2026-июнь: 172 375 784).
-	rows.append(divider())
 	raw_total = per_period(lambda d: sum(
 		flt(v) for v in d["adm_raw"].values()))
 	if not all_zero(raw_total):
@@ -742,7 +725,28 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 				continue
 			avm = per_period(lambda d, a=acc: flt(d["adm_raw"].get(a, 0)))
 			rows.append(mk(labels.get(acc, acc), avm, "detail", 1, is_cost=True))
+		rows.append(divider())
 
+	# ── (3) КОМПАНИЯЛАР КЕСИМИДА ОПЕРАЦИОН ФОЙДА ─────────────────────────────
+	rows.append(mk(
+		"Операционный прибыль (филиаллар кесимида)",
+		per_period(lambda d: sum(_co_profit(c) for c in d["companies"].values())),
+		"root", 0,
+	))
+	for co in companies:
+		vm = per_period(lambda d, c=co: _co_profit(d["companies"][c]))
+		if all_zero(vm):
+			continue
+		rows.append(mk(f"Операционный прибыль {company_label(co)}", vm, "detail", 1))
+	rows.append(divider())
+
+	# ── (4) ОПЕРАЦИОННЫЙ ПРИБЫЛЬ (жами) ──────────────────────────────────────
+	rows.append(mk("Операционный прибыль", per_period(_total_profit), "result", 0))
+	rows.append(mk(
+		"Рентабельность по операционной прибыли",
+		per_period(lambda d: _total_profit(d) / _total_revenue(d) * 100 if _total_revenue(d) else 0),
+		"percent", 1,
+	))
 
 	return rows
 
