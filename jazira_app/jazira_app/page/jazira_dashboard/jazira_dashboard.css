@@ -1,0 +1,218 @@
+/* Jazira — biznes paneli. Hamma selektor .jazira-dashboard ostida.
+ * Qattiq rang yo'q: Frappe o'zgaruvchilari + color-mix(). 8px masofa tizimi. */
+
+.jazira-dashboard {
+	--jzd-1: 4px; --jzd-2: 8px; --jzd-3: 12px; --jzd-4: 16px; --jzd-5: 20px; --jzd-6: 24px; --jzd-8: 32px;
+	--jzd-r-sm: 6px; --jzd-r-md: 10px; --jzd-r-lg: 14px;
+	--jzd-t-micro: 11px; --jzd-t-label: 12.5px; --jzd-t-body: 13.5px; --jzd-t-head: 15px;
+	--jzd-t-num: 22px; --jzd-t-hero: 30px; --jzd-t-page: 24px;
+
+	--jzd-surface: var(--card-bg); --jzd-recess: var(--control-bg);
+	--jzd-line: var(--border-color);
+	--jzd-line-soft: color-mix(in srgb, var(--border-color) 50%, var(--card-bg));
+	--jzd-hover: color-mix(in srgb, var(--control-bg) 60%, var(--card-bg));
+	--jzd-ink: var(--heading-color); --jzd-text: var(--text-color); --jzd-dim: var(--text-muted);
+
+	--jzd-ok: var(--alert-text-success); --jzd-warn: var(--alert-text-warning); --jzd-danger: var(--alert-text-danger);
+	--jzd-ok-bg: color-mix(in srgb, var(--alert-text-success) 9%, var(--card-bg));
+	--jzd-warn-bg: color-mix(in srgb, var(--alert-text-warning) 11%, var(--card-bg));
+	--jzd-danger-bg: color-mix(in srgb, var(--alert-text-danger) 9%, var(--card-bg));
+	--jzd-ok-edge: color-mix(in srgb, var(--alert-text-success) 30%, var(--border-color));
+	--jzd-warn-edge: color-mix(in srgb, var(--alert-text-warning) 30%, var(--border-color));
+	--jzd-danger-edge: color-mix(in srgb, var(--alert-text-danger) 30%, var(--border-color));
+	--jzd-accent: var(--blue-600);
+
+	/* Grafik palitrasi — 8 ta seriya (pie/donut uchun) */
+	--jzd-c1: var(--blue-600); --jzd-c2: var(--green-600); --jzd-c3: var(--amber-600);
+	--jzd-c4: var(--purple-600); --jzd-c5: var(--red-400); --jzd-c6: var(--cyan-600);
+	--jzd-c7: var(--gray-500); --jzd-c8: var(--pink-500);
+
+	color: var(--jzd-text); font-size: var(--jzd-t-body); font-variant-numeric: tabular-nums;
+	padding-bottom: 40px;
+
+	--charts-label-color: var(--text-muted); --charts-axis-line-color: var(--jzd-line-soft);
+	--charts-tooltip-bg: var(--card-bg); --charts-tooltip-title: var(--text-muted);
+	--charts-tooltip-label: var(--text-muted); --charts-tooltip-value: var(--heading-color);
+	--charts-legend-label: var(--text-muted); --charts-legend-value: var(--heading-color);
+}
+[data-theme="dark"] .jazira-dashboard, [data-theme="automatic"] .jazira-dashboard {
+	--jzd-accent: var(--blue-400); --jzd-line-soft: var(--border-color); --jzd-hover: var(--control-bg);
+	--jzd-c1: var(--blue-400); --jzd-c2: var(--green-500); --jzd-c3: var(--amber-400);
+	--jzd-c4: var(--purple-500); --jzd-c6: var(--cyan-400); --jzd-c8: var(--pink-400);
+}
+.jazira-dashboard *:focus-visible { outline: 2px solid var(--jzd-accent); outline-offset: 2px; border-radius: var(--jzd-r-sm); }
+
+/* ═══ Sarlavha va tablar ═══ */
+.jazira-header { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--jzd-4); flex-wrap: wrap; padding: var(--jzd-2) 0 var(--jzd-3); }
+.jazira-header-id h1 { margin: 0; font-size: var(--jzd-t-page); font-weight: 600; color: var(--jzd-ink); letter-spacing: -0.02em; line-height: 1.2; }
+.jazira-header-sub { margin: 3px 0 0; font-size: var(--jzd-t-label); color: var(--jzd-dim); }
+.jazira-header-meta { display: flex; align-items: center; gap: var(--jzd-3); }
+.jazira-updated { font-size: var(--jzd-t-label); color: var(--jzd-dim); white-space: nowrap; }
+.jazira-refresh { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--jzd-r-sm); border: 1px solid var(--jzd-line); background: var(--jzd-surface); color: var(--jzd-text); font-size: var(--jzd-t-label); font-weight: 500; cursor: pointer; }
+.jazira-refresh:hover { border-color: var(--jzd-accent); color: var(--jzd-accent); }
+
+.jazira-tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 2px; flex-wrap: wrap; padding: var(--jzd-2) 0 0; margin-bottom: var(--jzd-4); background: var(--bg-color); border-bottom: 1px solid var(--jzd-line); }
+.jazira-tabs button { border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; padding: 8px 14px; margin-bottom: -1px; font-size: var(--jzd-t-body); font-weight: 500; color: var(--jzd-dim); transition: color .15s ease, border-color .15s ease; }
+.jazira-tabs button:hover { color: var(--jzd-ink); }
+.jazira-tabs button.on { color: var(--jzd-ink); font-weight: 600; border-bottom-color: var(--jzd-ink); }
+
+/* ═══ Holat ═══ */
+.jazira-status:empty { display: none; }
+.jazira-status { margin-bottom: var(--jzd-4); }
+.jazira-status-banner { display: flex; align-items: center; gap: var(--jzd-3); padding: 10px var(--jzd-4); border: 1px solid var(--jzd-line); border-radius: var(--jzd-r-md); background: var(--jzd-surface); font-size: var(--jzd-t-body); }
+.jazira-status-banner b { font-weight: 600; color: var(--jzd-ink); }
+.jazira-status-banner svg { flex: none; }
+.jazira-status-banner.jzd-tone-warn { background: var(--jzd-warn-bg); border-color: var(--jzd-warn-edge); } .jazira-status-banner.jzd-tone-warn svg { color: var(--jzd-warn); }
+.jazira-status-banner.jzd-tone-danger { background: var(--jzd-danger-bg); border-color: var(--jzd-danger-edge); } .jazira-status-banner.jzd-tone-danger svg { color: var(--jzd-danger); }
+
+/* ═══ Setka ═══ */
+.jazira-body > * + * { margin-top: var(--jzd-4); }
+.jazira-grid { display: grid; gap: var(--jzd-4); align-items: start; }
+.jazira-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.jazira-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.jazira-two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--jzd-4); align-items: center; }
+
+/* ═══ KPI ═══ */
+.jazira-kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--jzd-line); border: 1px solid var(--jzd-line); border-radius: var(--jzd-r-lg); overflow: hidden; }
+.jazira-kpi-card { background: var(--jzd-surface); padding: var(--jzd-4) var(--jzd-4) var(--jzd-3); min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.jazira-kpi-label { font-size: var(--jzd-t-label); font-weight: 500; color: var(--jzd-dim); line-height: 1.35; }
+.jazira-kpi-value { font-size: var(--jzd-t-num); font-weight: 600; color: var(--jzd-ink); line-height: 1.15; letter-spacing: -0.015em; white-space: nowrap; }
+.jazira-kpi-card.jzd-lead { background: color-mix(in srgb, var(--control-bg) 40%, var(--card-bg)); box-shadow: inset 0 2px 0 var(--jzd-ink); }
+.jazira-kpi-card.jzd-lead .jazira-kpi-value { font-size: var(--jzd-t-hero); letter-spacing: -0.025em; }
+.jazira-kpi-foot { display: flex; align-items: center; gap: var(--jzd-2); min-height: 20px; flex-wrap: wrap; font-size: var(--jzd-t-label); }
+
+/* ═══ Raqam, Δ, teg, izoh ═══ */
+.jzd-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.jzd-neg { color: var(--jzd-danger); } .jzd-dim { color: var(--jzd-dim); } .jzd-small { display: block; font-size: var(--jzd-t-micro); }
+.jzd-delta { display: inline-flex; align-items: center; gap: 3px; font-size: var(--jzd-t-label); font-weight: 600; white-space: nowrap; }
+.jzd-delta.jzd-up, .jzd-up { color: var(--jzd-ok); } .jzd-delta.jzd-down, .jzd-down { color: var(--jzd-danger); } .jzd-delta.jzd-flat { color: var(--jzd-dim); font-weight: 400; }
+.jazira-tag { display: inline-block; padding: 1px 7px; border-radius: var(--jzd-r-sm); background: var(--jzd-recess); color: var(--jzd-dim); font-size: var(--jzd-t-micro); font-weight: 500; white-space: nowrap; vertical-align: 1px; }
+.jzd-tip { display: inline-flex; margin-left: 5px; color: var(--jzd-dim); cursor: help; opacity: .65; }
+.jzd-tip:hover, .jzd-tip:focus { opacity: 1; color: var(--jzd-accent); }
+.jazira-tooltip { position: absolute; z-index: 1060; max-width: 300px; padding: 9px 12px; border-radius: var(--jzd-r-sm); background: var(--jzd-ink); color: var(--card-bg); font-size: var(--jzd-t-label); line-height: 1.5; box-shadow: var(--shadow-lg); pointer-events: none; }
+
+/* ═══ Kartochka ═══ */
+.jazira-card { background: var(--jzd-surface); border: 1px solid var(--jzd-line); border-radius: var(--jzd-r-lg); overflow: hidden; min-width: 0; }
+.jazira-card.jzd-edge-ok { box-shadow: inset 3px 0 0 var(--jzd-ok); } .jazira-card.jzd-edge-danger { box-shadow: inset 3px 0 0 var(--jzd-danger); }
+.jazira-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--jzd-3); padding: var(--jzd-4) var(--jzd-5) 0; flex-wrap: wrap; }
+.jazira-card-head h3 { display: flex; align-items: center; margin: 0; font-size: var(--jzd-t-head); font-weight: 600; color: var(--jzd-ink); letter-spacing: -0.01em; line-height: 1.3; }
+.jazira-card-head p { margin: 3px 0 0; font-size: var(--jzd-t-label); color: var(--jzd-dim); }
+.jazira-card-head p b { color: var(--jzd-ink); font-weight: 600; }
+.jazira-card-tools { display: flex; align-items: center; gap: var(--jzd-2); margin-left: auto; flex-wrap: wrap; }
+.jazira-card-body { padding: var(--jzd-3) var(--jzd-5) var(--jzd-5); }
+
+.jazira-btn { padding: 5px 12px; border-radius: var(--jzd-r-sm); border: 1px solid var(--jzd-line); background: var(--jzd-surface); color: var(--jzd-text); font-size: var(--jzd-t-label); font-weight: 500; cursor: pointer; }
+.jazira-btn-primary { background: var(--jzd-accent); border-color: var(--jzd-accent); color: #fff; }
+.jazira-link { display: inline-flex; align-items: center; gap: 3px; border: 0; background: none; padding: 0; cursor: pointer; color: var(--jzd-accent); font-size: var(--jzd-t-label); font-weight: 500; white-space: nowrap; }
+.jazira-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.jazira-seg { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--jzd-line); border-radius: var(--jzd-r-sm); background: var(--jzd-recess); }
+.jazira-seg button { border: 0; background: transparent; cursor: pointer; padding: 3px 10px; border-radius: 4px; font-size: var(--jzd-t-label); font-weight: 500; color: var(--jzd-dim); white-space: nowrap; }
+.jazira-seg button.on { background: var(--jzd-surface); color: var(--jzd-ink); font-weight: 600; box-shadow: var(--shadow-sm); }
+
+/* ═══ Jadval ═══ */
+.jazira-table { width: calc(100% + 16px); margin: var(--jzd-2) -8px 0; border-collapse: collapse; font-size: var(--jzd-t-body); }
+.jazira-table-sm { font-size: var(--jzd-t-label); }
+.jazira-table th { text-align: left; padding: 0 8px 7px; font-size: var(--jzd-t-label); font-weight: 500; color: var(--jzd-dim); border-bottom: 1px solid var(--jzd-line); white-space: nowrap; }
+.jazira-table td { padding: 8px; border-bottom: 1px solid var(--jzd-line-soft); vertical-align: middle; }
+.jazira-table tbody tr:last-child td { border-bottom: 0; }
+.jazira-table .jzd-r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.jazira-table .jzd-c { text-align: center; }
+.jazira-table .jzd-name { color: var(--jzd-ink); font-weight: 500; }
+.jazira-table .jzd-rank { width: 26px; color: var(--jzd-dim); font-size: var(--jzd-t-label); }
+.jazira-table tr[data-report] { cursor: pointer; } .jazira-table tr[data-report]:hover td { background: var(--jzd-hover); }
+.jazira-table tr.jzd-selected td { background: color-mix(in srgb, var(--jzd-accent) 7%, var(--card-bg)); }
+.jazira-table tr.jzd-dim td { opacity: .5; }
+.jazira-table-pnl .jzd-row-result td { font-weight: 600; color: var(--jzd-ink); border-top: 1px solid var(--jzd-line); background: color-mix(in srgb, var(--control-bg) 35%, var(--card-bg)); }
+.jazira-table-pnl .jzd-row-sub td { font-weight: 500; }
+.jazira-table-pnl .jzd-row-detail td:first-child { padding-left: 22px; color: var(--jzd-dim); }
+.jazira-subhead { display: flex; align-items: center; gap: 6px; margin: var(--jzd-5) 0 var(--jzd-1); font-size: var(--jzd-t-body); font-weight: 600; color: var(--jzd-ink); }
+.jazira-subhead .jzd-dim { font-weight: 400; font-size: var(--jzd-t-label); }
+
+/* ═══ Gorizontal barlar (tovar, kreditor, xarajat) ═══ */
+.jazira-hbars { list-style: none; margin: var(--jzd-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.jazira-hbars li { display: grid; grid-template-columns: 22px minmax(0, 1.4fr) minmax(0, 1fr) auto auto; align-items: center; gap: var(--jzd-3); font-size: var(--jzd-t-body); }
+.jazira-hbar-rank { color: var(--jzd-dim); font-size: var(--jzd-t-micro); text-align: right; }
+.jazira-hbar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--jzd-ink); font-weight: 500; }
+.jazira-hbar-track { height: 8px; border-radius: 4px; background: var(--jzd-recess); overflow: hidden; }
+.jazira-hbar-track i { display: block; height: 100%; border-radius: 4px; background: var(--jzd-c1); }
+.jazira-hbar-val { min-width: 72px; text-align: right; font-weight: 600; color: var(--jzd-ink); }
+.jazira-hbar-extra { min-width: 86px; text-align: right; font-size: var(--jzd-t-label); color: var(--jzd-dim); }
+
+/* ═══ Raqam bloki, ro'yxat ═══ */
+.jazira-figure { margin-bottom: var(--jzd-3); }
+.jazira-figure-value { font-size: var(--jzd-t-hero); font-weight: 600; color: var(--jzd-ink); line-height: 1.1; letter-spacing: -0.025em; }
+.jazira-figure-foot { display: flex; align-items: center; gap: var(--jzd-2); margin-top: 5px; font-size: var(--jzd-t-label); }
+.jazira-minilist { list-style: none; margin: 0; padding: 0; font-size: var(--jzd-t-label); }
+.jazira-minilist li { display: flex; justify-content: space-between; align-items: baseline; gap: var(--jzd-3); padding: 5px 0; color: var(--jzd-dim); border-bottom: 1px solid var(--jzd-line-soft); }
+.jazira-minilist li:last-child { border-bottom: 0; }
+.jazira-minilist li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--jzd-text); }
+.jazira-minilist li > span em { font-style: normal; margin-left: 6px; }
+.jazira-minilist .jzd-num { color: var(--jzd-ink); font-weight: 500; margin-left: auto; }
+.jazira-minilist-share li > em { font-style: normal; min-width: 44px; text-align: right; font-weight: 600; font-size: var(--jzd-t-label); }
+.jazira-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 7px; background: var(--jzd-c1); }
+.jazira-minilist-share li:nth-child(2) .jazira-dot { background: var(--jzd-c2); } .jazira-minilist-share li:nth-child(3) .jazira-dot { background: var(--jzd-c3); }
+.jazira-minilist-share li:nth-child(4) .jazira-dot { background: var(--jzd-c4); } .jazira-minilist-share li:nth-child(5) .jazira-dot { background: var(--jzd-c5); }
+.jazira-divider { height: 1px; background: var(--jzd-line-soft); margin: var(--jzd-4) 0; }
+.jazira-stat-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--jzd-3); }
+.jazira-stat-grid > div { display: flex; flex-direction: column; gap: 3px; padding: var(--jzd-3); border: 1px solid var(--jzd-line-soft); border-radius: var(--jzd-r-md); }
+.jazira-stat-grid span { display: flex; align-items: center; font-size: var(--jzd-t-label); color: var(--jzd-dim); }
+.jazira-stat-grid .jzd-num { font-size: var(--jzd-t-head); font-weight: 600; color: var(--jzd-ink); }
+.jzd-warn-note { font-size: var(--jzd-t-micro); color: var(--jzd-warn); font-style: normal; }
+.jazira-coverage { margin: var(--jzd-3) 0; }
+.jazira-coverage-bar { height: 6px; border-radius: 3px; background: var(--jzd-recess); overflow: hidden; }
+.jazira-coverage-bar span { display: block; height: 100%; border-radius: 3px; background: var(--jzd-c5); }
+.jazira-coverage p { margin: 6px 0 0; font-size: var(--jzd-t-label); color: var(--jzd-dim); } .jazira-coverage b { color: var(--jzd-ink); }
+.jazira-co-block + .jazira-co-block { margin-top: var(--jzd-4); padding-top: var(--jzd-3); border-top: 1px solid var(--jzd-line-soft); }
+.jazira-co-block h4 { margin: 0 0 4px; font-size: var(--jzd-t-body); font-weight: 600; color: var(--jzd-ink); }
+
+/* ═══ Egalar ═══ */
+.jazira-owner-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--jzd-line); border: 1px solid var(--jzd-line); border-radius: var(--jzd-r-md); overflow: hidden; margin-bottom: var(--jzd-4); }
+.jazira-owner { background: var(--jzd-surface); padding: var(--jzd-4) var(--jzd-5); }
+.jazira-owner h4 { margin: 0; font-size: var(--jzd-t-body); font-weight: 600; color: var(--jzd-ink); }
+.jazira-owner-share { font-size: var(--jzd-t-hero); font-weight: 600; color: var(--jzd-ink); line-height: 1.15; letter-spacing: -0.025em; margin-top: 4px; }
+.jazira-owner > span { font-size: var(--jzd-t-label); }
+.jazira-owner-rows { margin: var(--jzd-3) 0 0; font-size: var(--jzd-t-label); }
+.jazira-owner-rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--jzd-3); padding: 4px 0; }
+.jazira-owner-rows dt { display: flex; align-items: center; font-weight: 400; color: var(--jzd-dim); } .jazira-owner-rows dd { margin: 0; font-weight: 500; color: var(--jzd-ink); }
+.jazira-owner-rows .jzd-sep { border-top: 1px solid var(--jzd-line-soft); margin-top: var(--jzd-2); padding-top: var(--jzd-2); }
+
+/* ═══ Ma'lumot sifati ═══ */
+.jazira-quality-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--jzd-3); }
+.jazira-quality-card { display: flex; align-items: flex-start; gap: var(--jzd-2); padding: var(--jzd-3); border-radius: var(--jzd-r-md); border: 1px solid var(--jzd-line); background: var(--jzd-surface); text-align: left; cursor: pointer; min-width: 0; }
+.jazira-quality-card:hover { border-color: var(--jzd-accent); }
+.jazira-quality-icon { display: inline-flex; flex: none; margin-top: 1px; color: var(--jzd-dim); }
+.jazira-quality-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.jazira-quality-body b { font-size: var(--jzd-t-label); font-weight: 600; color: var(--jzd-ink); }
+.jazira-quality-body span { font-size: var(--jzd-t-label); color: var(--jzd-dim); overflow: hidden; text-overflow: ellipsis; }
+.jazira-quality-card.jzd-tone-ok { background: var(--jzd-ok-bg); border-color: var(--jzd-ok-edge); } .jazira-quality-card.jzd-tone-ok .jazira-quality-icon { color: var(--jzd-ok); }
+.jazira-quality-card.jzd-tone-warn { background: var(--jzd-warn-bg); border-color: var(--jzd-warn-edge); } .jazira-quality-card.jzd-tone-warn .jazira-quality-icon { color: var(--jzd-warn); }
+.jazira-quality-card.jzd-tone-danger { background: var(--jzd-danger-bg); border-color: var(--jzd-danger-edge); } .jazira-quality-card.jzd-tone-danger .jazira-quality-icon { color: var(--jzd-danger); }
+
+/* ═══ Bo'sh / xato / skelet / grafik ═══ */
+.jazira-empty { padding: var(--jzd-8) 0; text-align: center; color: var(--jzd-dim); font-size: var(--jzd-t-body); }
+.jazira-note { margin: var(--jzd-3) 0 0; font-size: var(--jzd-t-label); color: var(--jzd-dim); line-height: 1.55; } .jazira-note b { color: var(--jzd-ink); }
+.jazira-inline-error { display: flex; align-items: center; gap: var(--jzd-2); padding: 10px var(--jzd-3); border-radius: var(--jzd-r-sm); background: var(--jzd-danger-bg); color: var(--jzd-text); font-size: var(--jzd-t-label); } .jazira-inline-error svg { color: var(--jzd-danger); flex: none; }
+.jazira-fatal { padding: 40px var(--jzd-5); text-align: center; border: 1px solid var(--jzd-line); border-radius: var(--jzd-r-lg); background: var(--jzd-surface); }
+.jazira-fatal-icon { color: var(--jzd-danger); margin-bottom: var(--jzd-2); } .jazira-fatal h3 { margin: 0 0 4px; font-size: var(--jzd-t-head); color: var(--jzd-ink); } .jazira-fatal p { margin: 0 0 var(--jzd-4); color: var(--jzd-dim); }
+.jzd-sk { height: 12px; border-radius: 4px; background: var(--jzd-recess); margin-bottom: 9px; animation: jzd-pulse 1.4s ease-in-out infinite; } .jzd-sk-chart { height: 240px; margin: 0; }
+@keyframes jzd-pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+@media (prefers-reduced-motion: reduce) { .jzd-sk { animation: none; } }
+.jazira-chart { min-height: 200px; margin-top: var(--jzd-2); }
+.jazira-chart .chart-container { font-family: inherit; }
+.jazira-chart .x.axis text, .jazira-chart .y.axis text, .jazira-chart .axis text { fill: var(--text-muted); font-size: var(--jzd-t-micro); }
+.jazira-chart .axis line, .jazira-chart .y-axis-guide, .jazira-chart line.dashed { stroke: var(--jzd-line-soft); stroke-width: 1px; }
+.jazira-chart .chart-legend text, .jazira-chart .legend-dataset-label { fill: var(--text-muted); font-size: var(--jzd-t-label); font-weight: 500; }
+.jazira-chart .legend-dataset-value { fill: var(--heading-color); font-weight: 600; }
+.jazira-dashboard .graph-svg-tip { border: 1px solid var(--jzd-line); border-radius: var(--jzd-r-sm); box-shadow: var(--shadow-lg); font-family: inherit; font-size: var(--jzd-t-label); }
+.jazira-dashboard .graph-svg-tip.comparison .title { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.jazira-dashboard .graph-svg-tip .tooltip-value { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* ═══ Moslashuvchanlik ═══ */
+@media (max-width: 1400px) { .jazira-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1100px) { .jazira-grid-2, .jazira-grid-3, .jazira-two { grid-template-columns: 1fr; } .jazira-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .jazira-owner-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+	.jazira-dashboard { --jzd-t-hero: 25px; --jzd-t-num: 20px; --jzd-t-page: 21px; }
+	.jazira-kpi-grid, .jazira-stat-grid { grid-template-columns: 1fr; }
+	.jazira-card-body { overflow-x: auto; } .jazira-table { min-width: 520px; }
+	.jazira-hbars li { grid-template-columns: 18px minmax(0, 1fr) auto; } .jazira-hbar-track, .jazira-hbar-extra { display: none; }
+}

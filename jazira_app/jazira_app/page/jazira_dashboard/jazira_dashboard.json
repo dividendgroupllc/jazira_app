@@ -1,0 +1,29 @@
+{
+ "creation": "2026-09-15 10:00:00.000000",
+ "doctype": "Page",
+ "icon": "dashboard",
+ "idx": 0,
+ "modified": "2026-09-16 00:15:50.130989",
+ "modified_by": "Administrator",
+ "module": "Jazira App",
+ "name": "jazira-dashboard",
+ "owner": "Administrator",
+ "page_name": "jazira-dashboard",
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Accounts Manager"
+  },
+  {
+   "role": "Accounts User"
+  },
+  {
+   "role": "Finance Manager"
+  }
+ ],
+ "standard": "Yes",
+ "system_page": 0,
+ "title": "Jazira — Бизнес панели"
+}
