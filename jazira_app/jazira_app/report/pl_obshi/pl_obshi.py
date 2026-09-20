@@ -202,11 +202,15 @@ def execute(filters=None):
 		frappe.throw(_("Ишчи компания топилмади"))
 
 	# Ichki aylanma DOIM chiqariladi — bu konsolidatsiyaning to'g'ri holati.
-	# (Filtr va "(−) Ички айланма" qatorlari egalar talabi bilan olib
-	# tashlangan: chalg'itardi, sheet'da ham yo'q edi. Kompaniya kesimi
-	# qatorlari to'liq o'z daromadini ko'rsatadi, jami esa ichki sotuvsiz —
-	# farqi ichki aylanma ekanini egalar biladi.)
+	# Ptichka esa faqat KO'RINISHni boshqaradi: yoqilsa, ayirilgan summa
+	# alohida qator bo'lib chiqadi va tushum/tannarx qanday jamlangani
+	# ko'rinib turadi.
+	#
+	# Nega `show_internal` (ko'rsat), `hide_internal` emas: Frappe
+	# belgilanmagan (0) checkbox filtrini so'rovga umuman qo'shmaydi.
+	# Shuning uchun standart holat 0 = "ko'rsatilmasin" bo'lishi kerak.
 	eliminate = 1
+	show_internal = int(filters.get("show_internal") or 0)
 
 	gl_rows = fetch_gl(companies, from_date, to_date)
 	internal_rows = fetch_internal_sales(companies, from_date, to_date) if eliminate else []
@@ -216,7 +220,7 @@ def execute(filters=None):
 	pdata = aggregate(period_list, companies, gl_rows, internal_rows, dividend_rows, owner_rows)
 
 	columns = get_columns(period_list)
-	data = build_rows(period_list, companies, pdata, eliminate)
+	data = build_rows(period_list, companies, pdata, eliminate, show_internal)
 
 	return columns, data
 
@@ -572,7 +576,7 @@ def get_columns(period_list):
 
 # ─── Row builder ─────────────────────────────────────────────────────────────
 
-def build_rows(period_list, companies, pdata, eliminate=1):
+def build_rows(period_list, companies, pdata, eliminate=1, show_internal=0):
 	fkeys = [_fk(p["key"]) for p in period_list]
 
 	def per_period(fn):
@@ -609,6 +613,13 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 			continue
 		rows.append(mk(f"Выручка {company_label(co)}", vm, "detail", 1))
 
+	# Ptichka yoqilganda: kompaniyalar yig'indisi va jami orasidagi farq
+	# ochiq ko'rsatiladi — Sklad filiallarga sotgan summa.
+	if show_internal:
+		ivm = per_period(lambda d: -flt(d["internal"]))
+		if not all_zero(ivm):
+			rows.append(mk("(−) Ички айланма (Склад → филиаллар)", ivm, "detail", 1))
+
 
 	# ── ИТОГО СЕБЕСТОИМОСТЬ ──────────────────────────────────────────────────
 	# Ҳар бир таркибий қисм алоҳида кўрсатилади: аввал турлар бўйича
@@ -642,6 +653,13 @@ def build_rows(period_list, companies, pdata, eliminate=1):
 			if all_zero(cvm):
 				continue
 			rows.append(mk(f"{bucket_label} {company_label(co)}", cvm, "detail", 2, is_cost=True))
+
+	# Ichki aylanma tannarxdan ham AYNI summa ayiriladi — shuning uchun
+	# marjinal foyda o'zgarmaydi. Ptichka yoqilganda buni ko'rsatamiz.
+	if show_internal:
+		ivm = per_period(lambda d: -flt(d["internal"]))
+		if not all_zero(ivm):
+			rows.append(mk("(−) Ички айланма (Склад → филиаллар)", ivm, "sub", 1, is_cost=True))
 
 
 	# ── МАРЖИНАЛЬНАЯ ПРИБЫЛЬ ─────────────────────────────────────────────────

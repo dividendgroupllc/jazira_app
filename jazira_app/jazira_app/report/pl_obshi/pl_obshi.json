@@ -26,12 +26,18 @@
    "options": "Yearly\nHalf-Yearly\nQuarterly\nMonthly",
    "default": "Monthly",
    "reqd": 1
+  },
+  {
+   "fieldname": "show_internal",
+   "label": "Ички айланмани кўрсатиш",
+   "fieldtype": "Check",
+   "default": 0
   }
  ],
  "idx": 0,
  "is_standard": "Yes",
  "letter_head": null,
- "modified": "2026-08-14 00:00:00.000000",
+ "modified": "2026-09-20 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "Jazira App",
  "name": "PL Obshi",

@@ -12,6 +12,7 @@
 		{ id: "products", label: __("Товарлар"), sections: ["products", "categories"] },
 		{ id: "branches", label: __("Филиаллар"), sections: ["companies", "company_products"] },
 		{ id: "finance", label: __("Молия"), sections: ["pnl", "expenses", "monthly", "owners"] },
+		{ id: "stock", label: __("Қолдиқ"), sections: ["stock"] },
 		{ id: "accounting", label: __("Бухгалтерия"), sections: ["cash", "health"] },
 	];
 
@@ -387,6 +388,161 @@
 			this.$body.append(this.block_expenses(d.expenses));
 			this.$body.append(this.block_owners(d.owners));
 			this.after_render();
+		},
+
+		// ── ҚОЛДИҚ (инвентаризация солиштируви) ─────────────────────────
+		tab_stock() {
+			const st = this.data.stock;
+			if (!st) return;
+			if (st.error) return this.$body.append(this.err(st));
+			this.$body.append(this.block_stock_summary(st));
+			this.$body.append(this.grid(2, this.block_stock_trend(st) + this.block_stock_coverage(st)));
+			this.$body.append(this.block_stock_counts(st));
+			this.$body.append(`<div class="jzd-stock-detail"></div>`);
+			this.$body.append(this.grid(2, this.block_stock_items(st, "shortage") + this.block_stock_items(st, "surplus")));
+			this.after_render();
+		},
+
+		block_stock_summary(st) {
+			const su = st.summary || {};
+			const cards = (su.latest || []).map((c) => `
+				<div class="jazira-kpi-card ${c.diff < 0 ? "jzd-edge-danger" : ""}">
+					<div class="jazira-kpi-label">${esc(c.label)} · ${esc(c.posting_date)}</div>
+					<div class="jazira-kpi-value ${c.diff < 0 ? "jzd-neg" : ""}">${money(c.diff)}</div>
+					<div class="jazira-kpi-foot">
+						<span class="jzd-dim">${__("санлган")} ${compact(c.counted)} / ${__("китобда")} ${compact(c.book)}</span>
+						<span class="jazira-tag ${c.diff < 0 ? "jzd-tone-danger" : ""}">${pct(c.diff_pct, 0)}</span>
+					</div>
+				</div>`).join("");
+			return `<div class="jazira-kpi-grid">
+				<div class="jazira-kpi-card jzd-lead">
+					<div class="jazira-kpi-label">${__("Охирги саноқлар бўйича фарқ")}${tip(__("Ҳар компаниянинг энг охирги саноғи олинади. Кунларни қўшиб бўлмайди — ҳар куни айни товар қайта саналади."))}</div>
+					<div class="jazira-kpi-value ${(su.latest_diff || 0) < 0 ? "jzd-neg" : ""}">${money(su.latest_diff)}</div>
+					<div class="jazira-kpi-foot"><span class="jzd-dim">${__("китобдан")} ${pct(su.latest_diff_pct, 0)}</span></div>
+				</div>
+				${cards}
+				<div class="jazira-kpi-card">
+					<div class="jazira-kpi-label">${__("Давр ичидаги саноқлар")}</div>
+					<div class="jazira-kpi-value">${qty(su.counts)}</div>
+					<div class="jazira-kpi-foot"><span class="jzd-dim">${su.companies || 0} ${__("компания")}</span></div>
+				</div>
+			</div>`;
+		},
+
+		block_stock_trend(st) {
+			const counts = (st.counts || []).slice().reverse();
+			const byco = {};
+			counts.forEach((c) => { (byco[c.label] = byco[c.label] || {})[c.posting_date] = c.diff; });
+			const dates = Array.from(new Set(counts.map((c) => c.posting_date))).sort();
+			this.defer(() => {
+				const $el = this.$body.find('[data-chart="stock-trend"]');
+				if (!$el.length || !dates.length) return;
+				this.chart("stock-trend", $el[0], {
+					type: "line", height: 260, colors: palette(),
+					data: { labels: dates.map((d) => d.slice(8) + "." + d.slice(5, 7)),
+						datasets: Object.keys(byco).map((k) => ({ name: k, values: dates.map((d) => byco[k][d] ?? null) })) },
+					lineOptions: { hideDots: dates.length > 30 ? 1 : 0, regionFill: 0 },
+					axisOptions: { xAxisMode: "tick", shortenYAxisNumbers: 1 },
+					tooltipOptions: { formatTooltipY: (v) => compact(v) },
+				});
+			});
+			return this.card({ title: __("Фарқ динамикаси"),
+				sub: __("ҳар саноқдаги фарқ — ўсиб бормоқдами?"),
+				body: dates.length ? `<div class="jazira-chart" data-chart="stock-trend"></div>` : this.empty() });
+		},
+
+		block_stock_coverage(st) {
+			const rows = (st.coverage || []).map((g) => `
+				<li><span>${esc(g.label)}</span>
+					<span class="jzd-num">${g.counted_days} ${__("кун")}</span>
+					<em class="${(g.coverage_pct || 0) >= 90 ? "jzd-up" : "jzd-down"}">${pct(g.coverage_pct, 0)}</em></li>`).join("");
+			const stale = st.stale_note ? `<div class="jazira-inline-error jzd-tone-warn">${ICON.alert}
+				<span>${__("Баъзи саноқларда черновикдаги «жорий қолдиқ» эскирган — саноқдан кейин ўша кунга яна ҳужжат тушган. Бу ерда китоб қолдиғи Stock Ledger'дан қайта ўқилган.")}</span></div>` : "";
+			return this.card({ title: __("Саноқ қамрови"),
+				tip: __("Давр ичида неча кун саноқ қилинган. Тушиб қолган кунлар — назорат узилган жойлар."),
+				body: rows ? `<ul class="jazira-minilist jazira-minilist-share">${rows}</ul>${stale}` : this.empty() });
+		},
+
+		block_stock_counts(st) {
+			const rows = (st.counts || []).map((c) => `
+				<tr data-count="${esc(c.doc)}">
+					<td class="jzd-name">${esc(c.posting_date)}</td>
+					<td>${esc(c.label)}</td>
+					<td class="jzd-dim">${esc((c.warehouse || "").replace(/ - \w+$/, ""))}</td>
+					<td class="jzd-r jzd-dim">${c.items}</td>
+					<td class="jzd-r">${money(c.counted)}</td>
+					<td class="jzd-r">${money(c.book)}</td>
+					<td class="jzd-r"><b class="${c.diff < 0 ? "jzd-neg" : ""}">${money(c.diff)}</b></td>
+					<td class="jzd-r ${c.diff < 0 ? "jzd-down" : "jzd-up"}">${pct(c.diff_pct, 0)}</td>
+				</tr>`).join("");
+			this.defer(() => {
+				this.$body.find("tr[data-count]").off("click").on("click", (e) => {
+					const $tr = $(e.currentTarget);
+					this.$body.find("tr[data-count]").removeClass("jzd-selected");
+					$tr.addClass("jzd-selected");
+					this.load_stock_detail($tr.data("count"));
+				});
+			});
+			return this.card({ title: __("Кунлик саноқлар"),
+				sub: __("қаторга босинг — товар-ба-товар тафсилоти очилади"),
+				tools: this.link(st.drill, "Material Report"),
+				body: rows ? `<table class="jazira-table jazira-table-hover jazira-table-sm"><thead><tr>
+					<th>${__("Сана")}</th><th>${__("Компания")}</th><th>${__("Омбор")}</th>
+					<th class="jzd-r">${__("Поз.")}</th><th class="jzd-r">${__("Саналган")}</th>
+					<th class="jzd-r">${__("Китобда")}</th><th class="jzd-r">${__("Фарқ")}</th><th class="jzd-r">%</th>
+					</tr></thead><tbody>${rows}</tbody></table>` : this.empty(__("Бу даврда саноқ йўқ")) });
+		},
+
+		load_stock_detail(doc_name) {
+			const $host = this.$body.find(".jzd-stock-detail");
+			$host.html(`<div class="jazira-card"><div class="jazira-card-body"><div class="jzd-sk" style="width:40%"></div><div class="jzd-sk" style="width:80%"></div></div></div>`);
+			frappe.call({ method: `${API}.get_stock_detail`, args: { doc_name } })
+				.then((r) => this.safe(() => this.render_stock_detail($host, r.message), $host))
+				.catch(() => $host.html(`<div class="jazira-inline-error">${ICON.alert}<span>${__("Тафсилотни юклаб бўлмади")}</span></div>`));
+		},
+
+		render_stock_detail($host, d) {
+			if (!d) return;
+			const rows = (d.rows || []).filter((r) => Math.abs(r.diff_qty) > 0.0001).map((r) => `
+				<tr>
+					<td class="jzd-name">${esc(r.item)}</td>
+					<td class="jzd-r">${r.counted_qty.toLocaleString("ru-RU")}</td>
+					<td class="jzd-r jzd-dim">${r.book_qty.toLocaleString("ru-RU")}</td>
+					<td class="jzd-r ${r.diff_qty < 0 ? "jzd-neg" : "jzd-up"}">${(r.diff_qty > 0 ? "+" : "") + Math.round(r.diff_qty * 100) / 100}</td>
+					<td class="jzd-r"><b class="${r.diff_value < 0 ? "jzd-neg" : ""}">${money(r.diff_value)}</b></td>
+					${r.snap_stale ? `<td class="jzd-dim jzd-small">${__("черновикда")} ${Math.round(r.snap_qty * 100) / 100}</td>` : "<td></td>"}
+				</tr>`).join("");
+			const top = (d.rows || []).slice(0, 10).filter((r) => r.diff_value < 0)
+				.map((r) => ({ label: r.item, value: Math.abs(r.diff_value) }));
+			$host.html(this.card({
+				title: `${__("Тафсилот")} — ${esc(d.label)} · ${esc(d.posting_date)}`,
+				sub: `${__("саналган")} ${money(d.counted)} · ${__("китобда")} ${money(d.book)} · ${__("фарқ")} <b class="${d.diff < 0 ? "jzd-neg" : ""}">${money(d.diff)}</b>`,
+				tools: `<button type="button" class="jazira-link jzd-open-doc">${__("Ҳужжатни очиш")} ${ICON.arrow}</button>`,
+				body: `${top.length ? `<h4 class="jazira-subhead">${__("Энг катта камомад")}</h4>${this.hbars(top)}` : ""}
+					<h4 class="jazira-subhead">${__("Товарлар")} <span class="jzd-dim">${__("фарқи борлари")}</span></h4>
+					<table class="jazira-table jazira-table-sm"><thead><tr>
+						<th>${__("Товар")}</th><th class="jzd-r">${__("Саналган")}</th><th class="jzd-r">${__("Китобда")}</th>
+						<th class="jzd-r">${__("Фарқ, дона")}</th><th class="jzd-r">${__("Фарқ, сўм")}</th><th></th>
+					</tr></thead><tbody>${rows || `<tr><td colspan="6">${this.empty(__("Фарқ йўқ"))}</td></tr>`}</tbody></table>`,
+			}));
+			$host.find(".jzd-open-doc").on("click", () => frappe.set_route("Form", "Stock Reconciliation", d.doc));
+			$host[0].scrollIntoView({ behavior: "smooth", block: "nearest" });
+		},
+
+		block_stock_items(st, kind) {
+			const list = st[kind] || [];
+			const rows = list.map((x) => `
+				<tr><td class="jzd-name">${esc(x.item)}<span class="jzd-dim jzd-small">${esc(x.date)}</span></td>
+					<td class="jzd-r">${x.counted_qty.toLocaleString("ru-RU")}</td>
+					<td class="jzd-r jzd-dim">${x.book_qty.toLocaleString("ru-RU")}</td>
+					<td class="jzd-r"><b class="${x.diff_value < 0 ? "jzd-neg" : ""}">${money(x.diff_value)}</b></td></tr>`).join("");
+			return this.card({
+				title: kind === "shortage" ? __("Энг катта камомад") : __("Ортиқча чиққанлар"),
+				sub: __("ҳар товар бўйича ЭНГ ОХИРГИ саноқ"),
+				cls: kind === "shortage" ? "jzd-edge-danger" : "jzd-edge-ok",
+				body: rows ? `<table class="jazira-table jazira-table-sm"><thead><tr>
+					<th>${__("Товар")}</th><th class="jzd-r">${__("Саналган")}</th><th class="jzd-r">${__("Китобда")}</th><th class="jzd-r">${__("Фарқ")}</th>
+					</tr></thead><tbody>${rows}</tbody></table>` : this.empty() });
 		},
 
 		// ── БУХГАЛТЕРИЯ ──────────────────────────────────────────────────

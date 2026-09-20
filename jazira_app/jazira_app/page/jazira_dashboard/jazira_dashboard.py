@@ -1018,6 +1018,207 @@ def _s_health(ctx):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 9. Qoldiq nazorati — sanalgan (draft) vs kitob qoldig'i
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _stock_rows(ctx, doc_names=None):
+	"""Draft inventarizatsiya qatorlari + O'SHA ONDAGI kitob qoldig'i.
+
+	Kitob qoldig'i draftdagi `current_qty` dan OLINMAYDI. Sabab: u draft
+	saqlangan paytdagi surat. Keyin o'sha sanaga yana hujjat tushsa
+	(masalan kunlik sotuv importi kechikib kelsa), kitob qoldig'i
+	o'zgaradi — draftdagi raqam esa eskiligicha qoladi. Shuning uchun
+	har qator uchun Stock Ledger'dan o'sha sana-VAQTGA eng oxirgi qoldiq
+	qayta o'qiladi. Draftlarning hammasi kun oxiriga yozilmagan (124 tadan
+	47 tasi kun o'rtasida), shuning uchun sana emas, aniq VAQT muhim.
+
+	Tezlik haqida: bu yerda qator-ba-qator indeks izlash ishlatiladi.
+	Butun ombor tarixini bir marta tortib, Python'da ikkilik qidiruv qilish
+	ham sinab ko'rildi — u faqat 3 oylik davrda arzimas yutdi, 1 hafta va
+	1 oylik davrlarda esa sezilarli sekinroq bo'ldi (91 000 qator tortish
+	har doim qimmat). Shuning uchun soddaroq usul qoldirildi.
+	"""
+	cond = ["sr.docstatus = 0", "sr.company IN %(companies)s"]
+	params = {"companies": ctx.scope_companies,
+			  "from_date": ctx.from_date, "to_date": ctx.to_date}
+	if doc_names:
+		cond.append("sr.name IN %(docs)s")
+		params["docs"] = doc_names
+	else:
+		cond.append("sr.posting_date BETWEEN %(from_date)s AND %(to_date)s")
+
+	return frappe.db.sql(
+		"""
+		SELECT sr.name AS doc, sr.company AS company, sr.posting_date AS posting_date,
+			   sr.set_warehouse AS warehouse, sr.modified AS modified,
+			   sri.item_code AS item_code, sri.item_name AS item_name,
+			   IFNULL(sri.warehouse, sr.set_warehouse) AS row_warehouse,
+			   sri.qty AS counted_qty, sri.valuation_rate AS counted_rate,
+			   sri.current_qty AS snap_qty, sri.current_valuation_rate AS snap_rate,
+			   (SELECT sle.qty_after_transaction FROM `tabStock Ledger Entry` sle
+				WHERE sle.item_code = sri.item_code
+				  AND sle.warehouse = IFNULL(sri.warehouse, sr.set_warehouse)
+				  AND sle.is_cancelled = 0
+				  AND sle.posting_datetime <= TIMESTAMP(sr.posting_date, sr.posting_time)
+				ORDER BY sle.posting_datetime DESC, sle.creation DESC LIMIT 1) AS book_qty,
+			   (SELECT sle.valuation_rate FROM `tabStock Ledger Entry` sle
+				WHERE sle.item_code = sri.item_code
+				  AND sle.warehouse = IFNULL(sri.warehouse, sr.set_warehouse)
+				  AND sle.is_cancelled = 0
+				  AND sle.posting_datetime <= TIMESTAMP(sr.posting_date, sr.posting_time)
+				ORDER BY sle.posting_datetime DESC, sle.creation DESC LIMIT 1) AS book_rate
+		FROM `tabStock Reconciliation Item` sri
+		JOIN `tabStock Reconciliation` sr ON sr.name = sri.parent
+		WHERE {cond}
+		ORDER BY sr.posting_date DESC, sr.name, sri.idx
+		""".format(cond=" AND ".join(cond)), params, as_dict=True)
+
+
+def _pack_stock_row(r):
+	cq = flt(r.counted_qty)
+	bq = flt(r.book_qty)
+	rate = flt(r.book_rate) or flt(r.counted_rate) or flt(r.snap_rate)
+	diff_qty = cq - bq
+	return {
+		"item": r.item_name or r.item_code,
+		"item_code": r.item_code,
+		"warehouse": r.row_warehouse,
+		"counted_qty": cq,
+		"book_qty": bq,
+		"snap_qty": flt(r.snap_qty),
+		"diff_qty": diff_qty,
+		"rate": rate,
+		"counted_value": cq * rate,
+		"book_value": bq * rate,
+		"diff_value": diff_qty * rate,
+		# Draft saqlangandan keyin kitob o'zgarganmi?
+		"snap_stale": abs(flt(r.snap_qty) - bq) > 0.001,
+	}
+
+
+def _s_stock(ctx):
+	"""Filiallar kunlik sanagan qoldiq bilan ERPNext qoldig'ini solishtirish.
+
+	DIQQAT: har kungi sanoq — mustaqil SURAT. Ularni bir-biriga qo'shib
+	bo'lmaydi (bir xil tovar 60 kun davomida 60 marta sanalgan). Shuning
+	uchun jami emas, HAR SANOQ alohida ko'rsatiladi, umumiy xulosa esa
+	har kompaniyaning OXIRGI sanog'idan olinadi.
+	"""
+	rows = _stock_rows(ctx)
+
+	docs = {}
+	for r in rows:
+		d = docs.setdefault(r.doc, {
+			"doc": r.doc, "company": r.company, "label": pl_obshi.company_label(r.company),
+			"posting_date": str(r.posting_date), "warehouse": r.warehouse,
+			"items": 0, "counted": 0.0, "book": 0.0, "diff": 0.0,
+			"shortage_items": 0, "surplus_items": 0, "stale": 0,
+		})
+		p = _pack_stock_row(r)
+		d["items"] += 1
+		d["counted"] += p["counted_value"]
+		d["book"] += p["book_value"]
+		d["diff"] += p["diff_value"]
+		if p["diff_qty"] < -0.0001:
+			d["shortage_items"] += 1
+		elif p["diff_qty"] > 0.0001:
+			d["surplus_items"] += 1
+		if p["snap_stale"]:
+			d["stale"] += 1
+
+	counts = sorted(docs.values(), key=lambda x: (x["posting_date"], x["company"]), reverse=True)
+	for c in counts:
+		c["counted"] = round(c["counted"]); c["book"] = round(c["book"]); c["diff"] = round(c["diff"])
+		c["diff_pct"] = _pct(c["diff"], c["book"])
+
+	# Har kompaniyaning OXIRGI sanog'i — umumiy xulosa shundan
+	latest = {}
+	for c in counts:
+		if c["company"] not in latest:
+			latest[c["company"]] = c
+	latest_list = sorted(latest.values(), key=lambda x: x["label"])
+	summary = {
+		"counts": len(counts),
+		"companies": len(latest_list),
+		"latest": latest_list,
+		"latest_diff": round(sum(c["diff"] for c in latest_list)),
+		"latest_book": round(sum(c["book"] for c in latest_list)),
+		"latest_counted": round(sum(c["counted"] for c in latest_list)),
+	}
+	summary["latest_diff_pct"] = _pct(summary["latest_diff"], summary["latest_book"])
+
+	# Davr bo'yicha eng katta kamomad tovarlari (har tovar uchun ENG OXIRGI
+	# sanoqdagi farqi olinadi — kunlarni qo'shish noto'g'ri bo'lardi)
+	per_item = {}
+	for r in rows:
+		p = _pack_stock_row(r)
+		key = (r.item_code, r.row_warehouse)
+		prev = per_item.get(key)
+		if not prev or str(r.posting_date) > prev["date"]:
+			per_item[key] = {"item": p["item"], "warehouse": p["warehouse"],
+							 "date": str(r.posting_date), "diff_qty": p["diff_qty"],
+							 "diff_value": p["diff_value"], "counted_qty": p["counted_qty"],
+							 "book_qty": p["book_qty"]}
+	items = list(per_item.values())
+	shortage = sorted([x for x in items if x["diff_value"] < 0], key=lambda x: x["diff_value"])[:12]
+	surplus = sorted([x for x in items if x["diff_value"] > 0], key=lambda x: -x["diff_value"])[:12]
+
+	# Sanoq qilinmagan kunlar — nazorat uzilgan joylar
+	by_company_dates = {}
+	for c in counts:
+		by_company_dates.setdefault(c["company"], set()).add(c["posting_date"])
+	gaps = []
+	for co in ctx.scope_companies:
+		dates = by_company_dates.get(co) or set()
+		if not dates:
+			continue
+		cursor, end, missing = getdate(ctx.from_date), getdate(ctx.to_date), 0
+		while cursor <= end:
+			if str(cursor) not in dates:
+				missing += 1
+			cursor = add_days(cursor, 1)
+		total_days = (end - getdate(ctx.from_date)).days + 1
+		gaps.append({"company": co, "label": pl_obshi.company_label(co),
+					 "counted_days": len(dates), "missing_days": missing,
+					 "coverage_pct": _pct(len(dates), total_days)})
+
+	return {
+		"summary": summary,
+		"counts": counts[:120],
+		"shortage": shortage,
+		"surplus": surplus,
+		"coverage": gaps,
+		"stale_note": any(c["stale"] for c in counts),
+		"drill": {"report": "Material Report"},
+	}
+
+
+@frappe.whitelist()
+def get_stock_detail(doc_name=None):
+	"""Bitta sanoqning tovar-ba-tovar tafsiloti."""
+	_require_access()
+	if not doc_name or not frappe.db.exists("Stock Reconciliation", doc_name):
+		frappe.throw(_("Ҳужжат топилмади"))
+	doc = frappe.db.get_value("Stock Reconciliation", doc_name,
+							  ["company", "posting_date", "set_warehouse", "docstatus"], as_dict=True)
+	ctx = frappe._dict({"scope_companies": [doc.company],
+						"from_date": str(doc.posting_date), "to_date": str(doc.posting_date)})
+	rows = [_pack_stock_row(r) for r in _stock_rows(ctx, doc_names=[doc_name])]
+	rows.sort(key=lambda x: x["diff_value"])
+	return {
+		"doc": doc_name, "company": doc.company,
+		"label": pl_obshi.company_label(doc.company),
+		"posting_date": str(doc.posting_date), "warehouse": doc.set_warehouse,
+		"rows": rows,
+		"counted": round(sum(r["counted_value"] for r in rows)),
+		"book": round(sum(r["book_value"] for r in rows)),
+		"diff": round(sum(r["diff_value"] for r in rows)),
+		"stale": sum(1 for r in rows if r["snap_stale"]),
+	}
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # API
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1026,7 +1227,7 @@ _BUILDERS = {
 	"products": _s_products, "categories": _s_categories, "weekdays": _s_weekdays,
 	"best_days": _s_best_days, "monthly": _s_monthly, "company_products": _s_company_products,
 	"pnl": _s_pnl, "expenses": _s_expenses, "cash": _s_cash, "owners": _s_owners,
-	"health": _s_health,
+	"health": _s_health, "stock": _s_stock,
 }
 
 DRILL_REPORTS = ("PL Obshi", "PL Calculation", "PL Hisoboti", "Balance Obshi",

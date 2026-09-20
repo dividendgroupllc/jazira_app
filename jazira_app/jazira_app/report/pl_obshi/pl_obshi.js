@@ -58,6 +58,14 @@ frappe.query_reports["PL Obshi"] = {
 			"options": "Yearly\nHalf-Yearly\nQuarterly\nMonthly",
 			"default": "Monthly",
 			"reqd": 1
+		},
+		{
+			// Ички айланма ДОИМ чиқарилади — бу фақат КЎРИНИШ.
+			// Ёқилса, Склад→филиал сотуви алоҳида қатор бўлиб чиқади.
+			"fieldname": "show_internal",
+			"label": __("Ички айланмани кўрсатиш"),
+			"fieldtype": "Check",
+			"default": 0
 		}
 	],
 

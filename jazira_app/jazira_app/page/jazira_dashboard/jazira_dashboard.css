@@ -216,3 +216,12 @@
 	.jazira-card-body { overflow-x: auto; } .jazira-table { min-width: 520px; }
 	.jazira-hbars li { grid-template-columns: 18px minmax(0, 1fr) auto; } .jazira-hbar-track, .jazira-hbar-extra { display: none; }
 }
+
+/* ═══ Qoldiq (inventarizatsiya) bo'limi ═══ */
+.jazira-dashboard .jzd-stock-detail:empty { display: none; }
+.jazira-dashboard .jzd-stock-detail { scroll-margin-top: 60px; }
+.jazira-dashboard .jazira-kpi-card.jzd-edge-danger { box-shadow: inset 0 2px 0 var(--jzd-danger); }
+.jazira-dashboard .jazira-kpi-card.jzd-edge-ok { box-shadow: inset 0 2px 0 var(--jzd-ok); }
+.jazira-dashboard .jazira-tag.jzd-tone-danger { background: var(--jzd-danger-bg); color: var(--jzd-danger); }
+.jazira-dashboard .jazira-table tr[data-count] { cursor: pointer; }
+.jazira-dashboard .jazira-table tr[data-count]:hover td { background: var(--jzd-hover); }
