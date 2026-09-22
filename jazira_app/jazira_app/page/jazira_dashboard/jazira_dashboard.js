@@ -525,6 +525,7 @@
 						<th class="jzd-r">${__("Фарқ, дона")}</th><th class="jzd-r">${__("Фарқ, сўм")}</th><th></th>
 					</tr></thead><tbody>${rows || `<tr><td colspan="6">${this.empty(__("Фарқ йўқ"))}</td></tr>`}</tbody></table>`,
 			}));
+			this.safe(() => this.label_table_cells($host));
 			$host.find(".jzd-open-doc").on("click", () => frappe.set_route("Form", "Stock Reconciliation", d.doc));
 			$host[0].scrollIntoView({ behavior: "smooth", block: "nearest" });
 		},
@@ -553,11 +554,30 @@
 			this.after_render();
 		},
 
-		// Chizilgandan keyin: grafiklar va tugmalar
+		// Chizilgandan keyin: grafiklar, tugmalar va jadval yorliqlari
 		after_render() {
 			const pending = this._pending || [];
 			this._pending = [];
 			pending.forEach((fn) => this.safe(fn));
+			this.safe(() => this.label_table_cells(this.$body));
+		},
+
+		// Har katakka o'z ustun sarlavhasini biriktiradi (telefon ko'rinishi
+		// uchun). Jadval tuzilishiga tegilmaydi — faqat atribut qo'shiladi.
+		label_table_cells($host) {
+			if (!$host || !$host.find) return;
+			$host.find("table.jazira-table").each(function () {
+				const $t = $(this);
+				const heads = $t.find("thead th").map((i, th) =>
+					$(th).text().replace(/\s+/g, " ").trim()).get();
+				if (!heads.length) return;
+				$t.find("tbody tr, tfoot tr").each(function () {
+					$(this).find("td").each((i, td) => {
+						const lbl = heads[i];
+						if (lbl && !td.getAttribute("data-label")) td.setAttribute("data-label", lbl);
+					});
+				});
+			});
 		},
 		defer(fn) { (this._pending = this._pending || []).push(fn); },
 
