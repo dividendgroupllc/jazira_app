@@ -1,0 +1,23 @@
+{#- Frappe'ning templates/includes/splash_screen.html ini almashtiradi (/app yuklanayotgandagi ekran).
+    Uslub shu yerda inline — tashqi CSS kutilmasdan birinchi chizilishdayoq to'g'ri o'lchamda chiqadi.
+    width/height atributlari rasm yuklanmasdan oldin joyini band qiladi (sakrash bo'lmaydi). -#}
+<style>
+	.splash {
+		position: fixed;
+		inset: 0;
+		z-index: 10000;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: #e30201;
+	}
+	.splash img {
+		width: min(80vw, 900px);
+		height: auto;
+		max-height: 60vh;
+		object-fit: contain;
+	}
+</style>
+<div class="splash">
+	<img src="/assets/jazira_app/images/jazira-logo.png" width="1200" height="436" alt="Jazira">
+</div>
