@@ -88,6 +88,7 @@ def get_data(filters):
 
     # 2. TRANZAKSIYALAR
     entries = get_gl_entries(filters)
+    remarks_map = get_remarks_map(entries)
     running_balance = flt(opening)
     
     for e in entries:
@@ -109,7 +110,7 @@ def get_data(filters):
             "voucher_type": e.voucher_type,
             "voucher_type_label": get_label(e.voucher_type),
             "voucher_no": e.voucher_no,
-            "remarks": get_remarks(e.voucher_type, e.voucher_no),
+            "remarks": remarks_map.get((e.voucher_type, e.voucher_no), ""),
             "debit": debit,
             "credit": credit,
             "balance": running_balance
@@ -159,23 +160,116 @@ def get_gl_entries(filters):
     """, params, as_dict=True)
 
 
-def get_remarks(voucher_type, voucher_no):
-    if not voucher_type or not voucher_no:
-        return ""
-    try:
-        if voucher_type == "Sales Invoice":
-            items = frappe.db.sql("SELECT item_name FROM `tabSales Invoice Item` WHERE parent = %s LIMIT 2", voucher_no, as_dict=True)
-            return ", ".join([i.item_name for i in items]) if items else ""
-        elif voucher_type == "Purchase Invoice":
-            items = frappe.db.sql("SELECT item_name FROM `tabPurchase Invoice Item` WHERE parent = %s LIMIT 2", voucher_no, as_dict=True)
-            return ", ".join([i.item_name for i in items]) if items else ""
-        elif voucher_type == "Payment Entry":
-            return frappe.db.get_value("Payment Entry", voucher_no, "mode_of_payment") or ""
-        elif voucher_type == "Journal Entry":
-            return frappe.db.get_value("Journal Entry", voucher_no, "user_remark") or ""
-    except:
-        pass
-    return ""
+def get_remarks_map(entries):
+    """Izoh ustuni uchun barcha hujjat izohlarini bitta marta oladi.
+
+    Tartib:
+    1. Kassa.primechaniya — Kassada yozilgan haqiqiy izoh (ustuvor). Kassa'dan
+       yaratilgan PE/JE'da izoh o'rnida shablon matn ("Kassa: KASSA-… - Расход")
+       turadi, shu sababli dds va expense_analysis reportlarida ham Kassa izohi
+       birinchi o'rinda turadi.
+    2. Bo'lmasa — hujjat turiga qarab: faktura tovarlari, to'lov usuli,
+       JE user_remark.
+
+    Qaytaradi: {(voucher_type, voucher_no): izoh}
+    """
+    by_type = {}
+    for e in entries:
+        if e.voucher_type and e.voucher_no:
+            by_type.setdefault(e.voucher_type, set()).add(e.voucher_no)
+
+    # Kassa faqat PE/JE yaratadi — izohni shular uchun qidiramiz
+    kassa_vouchers = by_type.get("Payment Entry", set()) | by_type.get("Journal Entry", set())
+    kassa_remarks = get_kassa_remarks(kassa_vouchers)
+
+    remarks = {}
+    for vt, vouchers in by_type.items():
+        if vt == "Sales Invoice":
+            fallback = get_invoice_item_names("Sales Invoice Item", vouchers)
+        elif vt == "Purchase Invoice":
+            fallback = get_invoice_item_names("Purchase Invoice Item", vouchers)
+        elif vt == "Payment Entry":
+            fallback = get_field_map("Payment Entry", "mode_of_payment", vouchers)
+        elif vt == "Journal Entry":
+            fallback = get_field_map("Journal Entry", "user_remark", vouchers)
+        else:
+            fallback = {}
+
+        for v in vouchers:
+            remarks[(vt, v)] = kassa_remarks.get(v) or fallback.get(v, "")
+
+    return remarks
+
+
+def get_kassa_remarks(voucher_nos):
+    """Kassa hujjatidagi izohni (primechaniya) shu Kassa yaratgan PE/JE
+    voucher_no'siga bog'lab qaytaradi ({voucher_no: izoh}).
+
+    Kassa bir nechta link maydoniga ega: journal_entry, payment_entry,
+    payment_entry_receive, payment_entry_supplier.
+    """
+    if not voucher_nos:
+        return {}
+
+    rows = frappe.db.sql("""
+        SELECT payment_entry, payment_entry_receive, payment_entry_supplier,
+               journal_entry, primechaniya
+        FROM `tabKassa`
+        WHERE docstatus = 1
+          AND primechaniya IS NOT NULL AND primechaniya != ''
+          AND (
+              payment_entry IN %(vouchers)s
+              OR payment_entry_receive IN %(vouchers)s
+              OR payment_entry_supplier IN %(vouchers)s
+              OR journal_entry IN %(vouchers)s
+          )
+    """, {"vouchers": list(voucher_nos)}, as_dict=True)
+
+    result = {}
+    for r in rows:
+        for field in ("payment_entry", "payment_entry_receive",
+                      "payment_entry_supplier", "journal_entry"):
+            voucher = r.get(field)
+            if voucher and voucher in voucher_nos:
+                result[voucher] = r.primechaniya
+    return result
+
+
+def get_invoice_item_names(item_doctype, voucher_nos):
+    """Faktura izohi o'rnida — har hujjatning birinchi 2 tovari."""
+    if not voucher_nos:
+        return {}
+
+    rows = frappe.db.sql(f"""
+        SELECT parent, item_name
+        FROM `tab{item_doctype}`
+        WHERE parent IN %(vouchers)s
+        ORDER BY parent, idx
+    """, {"vouchers": list(voucher_nos)}, as_dict=True)
+
+    names = {}
+    for r in rows:
+        if not r.item_name:
+            continue
+        items = names.setdefault(r.parent, [])
+        if len(items) < 2:
+            items.append(r.item_name)
+
+    return {parent: ", ".join(items) for parent, items in names.items()}
+
+
+def get_field_map(doctype, fieldname, voucher_nos):
+    """{hujjat nomi: maydon qiymati} — bitta so'rovda."""
+    if not voucher_nos:
+        return {}
+
+    rows = frappe.db.sql(f"""
+        SELECT name, `{fieldname}` AS value
+        FROM `tab{doctype}`
+        WHERE name IN %(vouchers)s
+    """, {"vouchers": list(voucher_nos)}, as_dict=True)
+
+    return {r.name: (r.value or "") for r in rows}
 
 
 def get_label(voucher_type):
